@@ -121,6 +121,9 @@ DEFINE_string(sgf_dir, "", "SGF directory. If empty, no SGF is written.");
 DEFINE_double(holdout_pct, 0.03,
               "Fraction of games to hold out for validation.");
 
+DEFINE_string(sub_dir_format, "%Y-%m-%d-%H",
+              "Time format of output subdirectory");
+
 // Self play flags:
 //   --inject_noise=true
 //   --soft_pick=true
@@ -134,19 +137,18 @@ DEFINE_double(holdout_pct, 0.03,
 namespace minigo {
 namespace {
 
-std::string GetOutputName(absl::Time now, size_t i) {
+std::string GetOutputBaseName(absl::Time now) {
   auto timestamp = absl::ToUnixSeconds(now);
   std::string output_name;
   char hostname[64];
   if (gethostname(hostname, sizeof(hostname)) != 0) {
     std::strncpy(hostname, "unknown", sizeof(hostname));
   }
-  return absl::StrCat(timestamp, "-", hostname, "-", i);
+  return absl::StrCat(timestamp, "-", hostname, "-");
 }
 
-std::string GetOutputDir(absl::Time now, const std::string& root_dir) {
-  auto sub_dirs = absl::FormatTime("%Y-%m-%d-%H", now, absl::UTCTimeZone());
-  return file::JoinPath(root_dir, sub_dirs);
+std::string GetOutputSubDir(absl::Time now) {
+  return absl::FormatTime(FLAGS_sub_dir_format, now, absl::UTCTimeZone());
 }
 
 void WriteExample(const std::string& output_dir, const std::string& output_name,
@@ -226,7 +228,7 @@ void ParseMctsPlayerOptionsFromFlags(MctsPlayer::Options* options) {
   options->soft_pick = FLAGS_soft_pick;
   options->random_symmetry = FLAGS_random_symmetry;
   options->resign_threshold = FLAGS_resign_threshold;
-  options->batch_size = FLAGS_virtual_losses;
+  options->virtual_losses = FLAGS_virtual_losses;
   options->komi = FLAGS_komi;
   options->random_seed = FLAGS_seed;
   options->num_readouts = FLAGS_num_readouts;
@@ -238,16 +240,22 @@ void ParseMctsPlayerOptionsFromFlags(MctsPlayer::Options* options) {
 class SelfPlayer {
  public:
   void Run() {
-    {
-      absl::MutexLock lock(&mutex_);
-      dual_net_factory_ = NewDualNetFactory(FLAGS_model, FLAGS_parallel_games);
-    }
+    auto start_time = absl::Now();
+    network_ = NewDualNetService(FLAGS_model);
+    std::cerr << "DualNet service created from " << FLAGS_model << " in "
+              << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
+              << std::endl;
+
     for (int i = 0; i < FLAGS_parallel_games; ++i) {
       threads_.emplace_back(std::bind(&SelfPlayer::ThreadRun, this, i));
     }
     for (auto& t : threads_) {
       t.join();
     }
+
+    std::cerr << "All threads stopped, total time "
+              << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
+              << std::endl;
   }
 
  private:
@@ -346,7 +354,7 @@ class SelfPlayer {
                "Use --checkpoint_dir and --engine=remote to perform inference "
                "using the most recent checkpoint from training.";
         game_options.Init(thread_id, &rnd_);
-        player = absl::make_unique<MctsPlayer>(dual_net_factory_->New(),
+        player = absl::make_unique<MctsPlayer>(network_.get(),
                                                game_options.player_options);
       }
 
@@ -374,7 +382,8 @@ class SelfPlayer {
 
       // Write the outputs.
       auto now = absl::Now();
-      auto output_name = GetOutputName(now, thread_id);
+      auto output_name = GetOutputBaseName(now) + std::to_string(thread_id);
+      auto sub_dir = GetOutputSubDir(now);
 
       bool is_holdout;
       {
@@ -384,16 +393,15 @@ class SelfPlayer {
       auto example_dir =
           is_holdout ? game_options.holdout_dir : game_options.output_dir;
       if (!example_dir.empty()) {
-        WriteExample(GetOutputDir(now, example_dir), output_name, *player);
+        WriteExample(file::JoinPath(example_dir, sub_dir), output_name,
+                     *player);
       }
 
       if (!game_options.sgf_dir.empty()) {
-        WriteSgf(
-            GetOutputDir(now, file::JoinPath(game_options.sgf_dir, "clean")),
-            output_name, *player, false);
-        WriteSgf(
-            GetOutputDir(now, file::JoinPath(game_options.sgf_dir, "full")),
-            output_name, *player, true);
+        WriteSgf(file::JoinPath(game_options.sgf_dir, "clean", sub_dir),
+                 output_name, *player, false);
+        WriteSgf(file::JoinPath(game_options.sgf_dir, "full", sub_dir),
+                 output_name, *player, true);
       }
     } while (game_options.run_forever);
 
@@ -440,8 +448,9 @@ class SelfPlayer {
     }
   }
 
+  std::unique_ptr<DualNet::Service> network_;
+
   absl::Mutex mutex_;
-  std::unique_ptr<DualNetFactory> dual_net_factory_ GUARDED_BY(&mutex_);
   Random rnd_ GUARDED_BY(&mutex_);
   std::vector<std::thread> threads_;
   uint64_t flags_timestamp_ = 0;
@@ -460,12 +469,12 @@ void Eval() {
   options.random_symmetry = true;
 
   options.name = std::string(file::Stem(FLAGS_model));
-  auto black_factory = NewDualNetFactory(FLAGS_model, 1);
-  auto black = absl::make_unique<MctsPlayer>(black_factory->New(), options);
+  auto black_network = NewDualNetService(FLAGS_model);
+  auto black = absl::make_unique<MctsPlayer>(black_network.get(), options);
 
   options.name = std::string(file::Stem(FLAGS_model_two));
-  auto white_factory = NewDualNetFactory(FLAGS_model_two, 1);
-  auto white = absl::make_unique<MctsPlayer>(white_factory->New(), options);
+  auto white_network = NewDualNetService(FLAGS_model_two);
+  auto white = absl::make_unique<MctsPlayer>(white_network.get(), options);
 
   auto* player = black.get();
   auto* other_player = white.get();
@@ -480,7 +489,7 @@ void Eval() {
   std::cerr << player->result_string() << "\n";
   std::cerr << "Black was: " << black->name() << "\n";
 
-  std::string output_name = absl::StrCat(GetOutputName(absl::Now(), 0), "-",
+  std::string output_name = absl::StrCat(GetOutputBaseName(absl::Now()), "0-",
                                          black->name(), "-", white->name());
 
   // Write SGF.
@@ -496,8 +505,8 @@ void Gtp() {
   options.name = absl::StrCat("minigo-", file::Basename(FLAGS_model));
   options.ponder_limit = FLAGS_ponder_limit;
   options.courtesy_pass = FLAGS_courtesy_pass;
-  auto dual_net_factory = NewDualNetFactory(FLAGS_model, 1);
-  auto player = absl::make_unique<GtpPlayer>(dual_net_factory->New(), options);
+  auto dual_net_service = NewDualNetService(FLAGS_model);
+  auto player = absl::make_unique<GtpPlayer>(dual_net_service.get(), options);
   player->Run();
 }
 

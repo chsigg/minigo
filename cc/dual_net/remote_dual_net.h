@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef CC_DUAL_NET_LITE_DUAL_NET_H_
-#define CC_DUAL_NET_LITE_DUAL_NET_H_
+#ifndef CC_DUAL_NET_REMOTE_DUAL_NET_H_
+#define CC_DUAL_NET_REMOTE_DUAL_NET_H_
+
+#include <memory>
 
 #include "cc/dual_net/dual_net.h"
 
 namespace minigo {
 
-std::unique_ptr<DualNet> NewLiteDualNet(const std::string& model_path);
+std::unique_ptr<DualNet> NewRemoteDualNet(const std::string& model_path);
 
 }  // namespace minigo
 
-#endif  // CC_DUAL_NET_LITE_DUAL_NET_H_
+#endif  // CC_DUAL_NET_REMOTE_DUAL_NET_H_

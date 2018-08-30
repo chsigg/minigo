@@ -46,14 +46,14 @@ class GtpPlayer : public MctsPlayer {
     bool courtesy_pass = false;
   };
 
-  GtpPlayer(std::unique_ptr<DualNet> network, const Options& options);
+  GtpPlayer(DualNet::Service* network, const Options& options);
 
   void Run();
 
   Coord SuggestMove() override;
 
  protected:
-  absl::Span<MctsNode* const> TreeSearch(int batch_size) override;
+  std::vector<MctsNode*> TreeSearch() override;
 
  private:
   struct Response {

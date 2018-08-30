@@ -31,8 +31,8 @@
 
 namespace minigo {
 
-GtpPlayer::GtpPlayer(std::unique_ptr<DualNet> network, const Options& options)
-    : MctsPlayer(std::move(network), options),
+GtpPlayer::GtpPlayer(DualNet::Service* network, const Options& options)
+    : MctsPlayer(network, options),
       ponder_limit_(options.ponder_limit),
       courtesy_pass_(options.courtesy_pass) {
   RegisterCmd("benchmark", &GtpPlayer::HandleBenchmark);
@@ -101,9 +101,9 @@ bool GtpPlayer::MaybePonder() {
     std::cerr << "pondering...\n";
   }
 
-  TreeSearch(options().batch_size);
+  TreeSearch();
 
-  ponder_count_ += options().batch_size;
+  ponder_count_ += options().virtual_losses;
   if (ponder_count_ >= ponder_limit_) {
     std::cerr << root()->Describe() << "\n";
     std::cerr << "finished pondering\n";
@@ -121,7 +121,7 @@ bool GtpPlayer::HandleCmd(const std::string& line) {
   }
 
   // Split the GTP command and its arguments.
-  auto cmd = std::string(args[0]);
+  auto cmd = static_cast<std::string>(args[0]);
   args.erase(args.begin());
 
   if (cmd == "quit") {
@@ -138,8 +138,8 @@ bool GtpPlayer::HandleCmd(const std::string& line) {
   return true;
 }
 
-absl::Span<MctsNode* const> GtpPlayer::TreeSearch(int batch_size) {
-  auto leaves = MctsPlayer::TreeSearch(batch_size);
+std::vector<MctsNode*> GtpPlayer::TreeSearch() {
+  auto leaves = MctsPlayer::TreeSearch();
   if (!leaves.empty() && report_search_interval_ != absl::ZeroDuration()) {
     auto now = absl::Now();
     if (now - last_report_time_ > report_search_interval_) {
@@ -168,8 +168,8 @@ GtpPlayer::Response GtpPlayer::CheckArgsRange(absl::string_view cmd,
   if (args.size() < expected_min_args || args.size() > expected_max_args) {
     return Response::Error("expected between ", expected_min_args, " and ",
                            expected_max_args, " args for GTP command ", cmd,
-                           ", got ", args.size(), " args: ",
-                           absl::StrJoin(args, " "));
+                           ", got ", args.size(),
+                           " args: ", absl::StrJoin(args, " "));
   }
   return Response::Ok();
 }
@@ -186,7 +186,7 @@ GtpPlayer::Response GtpPlayer::DispatchCmd(const std::string& cmd,
 
 GtpPlayer::Response GtpPlayer::HandleBenchmark(absl::string_view cmd,
                                                CmdArgs args) {
-  // benchmark [readouts] [batch_size]
+  // benchmark [readouts] [virtual_losses]
   // Note: By default use current time_control (readouts or time).
   auto response = CheckArgsRange(cmd, 0, 2, args);
   if (!response.ok) {
@@ -196,7 +196,7 @@ GtpPlayer::Response GtpPlayer::HandleBenchmark(absl::string_view cmd,
   auto saved_options = options();
   MctsPlayer::Options temp_options = options();
 
-  if (args.size() > 0) {
+  if (!args.empty()) {
     temp_options.seconds_per_move = 0;
     if (!absl::SimpleAtoi(args[0], &temp_options.num_readouts)) {
       return Response::Error("bad num_readouts");
@@ -204,7 +204,7 @@ GtpPlayer::Response GtpPlayer::HandleBenchmark(absl::string_view cmd,
   }
 
   if (args.size() == 2) {
-    if (!absl::SimpleAtoi(args[1], &temp_options.batch_size)) {
+    if (!absl::SimpleAtoi(args[1], &temp_options.virtual_losses)) {
       return Response::Error("bad batch_size");
     }
   }
@@ -247,7 +247,8 @@ GtpPlayer::Response GtpPlayer::HandleClearBoard(absl::string_view cmd,
   return Response::Ok();
 }
 
-GtpPlayer::Response GtpPlayer::HandleEcho(absl::string_view cmd, CmdArgs args) {
+GtpPlayer::Response GtpPlayer::HandleEcho(absl::string_view /*cmd*/,
+                                          CmdArgs args) {
   return Response::Ok(absl::StrJoin(args, " "));
 }
 
@@ -355,7 +356,8 @@ GtpPlayer::Response GtpPlayer::HandleKnownCommand(absl::string_view cmd,
     return response;
   }
   std::string result;
-  if (cmd_handlers_.find(std::string(args[0])) != cmd_handlers_.end()) {
+  if (cmd_handlers_.find(static_cast<std::string>(args[0])) !=
+      cmd_handlers_.end()) {
     result = "true";
   } else {
     result = "false";
@@ -401,7 +403,7 @@ GtpPlayer::Response GtpPlayer::HandleLoadsgf(absl::string_view cmd,
   }
 
   std::ifstream f;
-  f.open(std::string(args[0]));
+  f.open(static_cast<std::string>(args[0]));
   if (!f.is_open()) {
     std::cerr << "Couldn't read \"" << args[0] << "\"\n";
     return Response::Error("cannot load file");

@@ -40,6 +40,10 @@ float TimeRecommendation(int move_num, float seconds_per_move, float time_limit,
                          float decay_factor);
 
 class MctsPlayer {
+  // Cannot be copyable or movable due to lambdas capturing 'this'.
+  MctsPlayer(const MctsPlayer&) = delete;
+  MctsPlayer& operator=(const MctsPlayer&) = delete;
+
  public:
   struct Options {
     bool inject_noise = true;
@@ -53,8 +57,7 @@ class MctsPlayer {
     // incorrectly resigned early, had resignations been enabled.
     bool resign_enabled = true;
 
-    // TODO(tommadams): rename batch_size to virtual_losses.
-    int batch_size = 8;
+    int virtual_losses = 8;
     float komi = kDefaultKomi;
     std::string name = "minigo";
 
@@ -94,11 +97,9 @@ class MctsPlayer {
   // If position is non-null, the player will be initilized with that board
   // state. Otherwise, the player is initialized with an empty board with black
   // to play.
-  MctsPlayer(std::unique_ptr<DualNet> network, const Options& options);
+  MctsPlayer(DualNet::Service* network, const Options& options);
 
   virtual ~MctsPlayer();
-
-  void InitializeGame(const Position& position);
 
   void NewGame();
 
@@ -107,8 +108,6 @@ class MctsPlayer {
   void PlayMove(Coord c);
 
   bool ShouldResign() const;
-
-  void GetNodeFeatures(const MctsNode* node, DualNet::BoardFeatures* features);
 
   // Returns the root of the current search tree, i.e. the current board state.
   MctsNode* root() { return root_; }
@@ -143,11 +142,12 @@ class MctsPlayer {
  protected:
   Options* mutable_options() { return &options_; }
 
+  void InitializeGame(const Position& position);
+
   Coord PickMove();
 
-  // Returns the list of nodes that TreeSearch performed inference on.
-  // The contents of the returned Span is valid until the next call TreeSearch.
-  virtual absl::Span<MctsNode* const> TreeSearch(int batch_size);
+  // Performs a tree search and incorporates the results into the graph.
+  virtual std::vector<MctsNode*> TreeSearch();
 
   // Returns the root of the game tree.
   MctsNode* game_root() { return &game_root_; }
@@ -157,15 +157,16 @@ class MctsPlayer {
 
   std::string FormatScore(float score) const;
 
-  DualNet* network() { return network_.get(); }
+  DualNet::Service* network() { return network_; }
 
   // Run inference for the given leaf nodes & incorportate the inference output.
-  void ProcessLeaves(absl::Span<MctsNode*> leaves);
+  void ProcessLeaves(const std::vector<MctsNode*>& leaves);
 
  private:
   void PushHistory(Coord c);
 
-  std::unique_ptr<DualNet> network_;
+  DualNet::Service* network_;  // Not owned.
+  DualNet::Client client_;
   int temperature_cutoff_;
 
   MctsNode::EdgeStats dummy_stats_;
@@ -207,13 +208,9 @@ class MctsPlayer {
     // case is that the model changes change part-way through a tree search.
     int last_move = 0;
   };
-  std::string model_;
   std::vector<InferenceInfo> inferences_;
 
-  // Vectors reused when running TreeSearch.
-  std::vector<MctsNode*> leaves_;
-  std::vector<DualNet::BoardFeatures> features_;
-  std::vector<DualNet::Output> outputs_;
+ private:
   std::vector<symmetry::Symmetry> symmetries_used_;
   std::vector<const Position::Stones*> recent_positions_;
 };

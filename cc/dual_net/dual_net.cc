@@ -14,13 +14,73 @@
 
 #include "cc/dual_net/dual_net.h"
 
+#include <vector>
+
 #include "cc/color.h"
 #include "cc/constants.h"
+
+// TODO(csigg): Expand explanation.
+DEFINE_int32(batch_size, 256, "Inference batch size.");
+DEFINE_int32(num_gpus, 1, "Number of GPUs to use.");
 
 namespace minigo {
 
 constexpr int DualNet::kNumStoneFeatures;
 constexpr int DualNet::kNumBoardFeatures;
+
+DualNet::Service::Service(std::unique_ptr<DualNet> dual_net)
+    : dual_net_(std::move(dual_net)) {}
+
+DualNet::Service::~Service() = default;
+
+void DualNet::Service::IncrementClientCount() {}
+
+void DualNet::Service::DecrementClientCount() {}
+
+void DualNet::Service::FlushClient() {}
+
+std::future<DualNet::Result> DualNet::Service::RunManyAsync(
+    std::vector<BoardFeatures>&& features) {
+  std::vector<const BoardFeatures*> feature_ptrs;
+  feature_ptrs.reserve(features.size());
+  CopyPointers(features.begin(), features.size(),
+               std::back_inserter(feature_ptrs));
+
+  Functor functor(std::move(features));
+
+  std::vector<Output*> output_ptrs;
+  output_ptrs.reserve(feature_ptrs.size());
+  CopyPointers(functor.outputs.begin(), feature_ptrs.size(),
+               std::back_inserter(output_ptrs));
+
+  auto future = functor.promise.get_future();
+  dual_net_->RunManyAsync(std::move(feature_ptrs), std::move(output_ptrs),
+                          Continuation(std::move(functor)));
+  return future;
+}
+
+DualNet::DualNet(const std::string& model_path) : model_path_(model_path) {}
+
+DualNet::~DualNet() = default;
+
+DualNet::Result DualNet::RunMany(std::vector<BoardFeatures>&& features) {
+  std::vector<const DualNet::BoardFeatures*> feature_ptrs;
+  feature_ptrs.reserve(features.size());
+  CopyPointers(features.begin(), features.size(),
+               std::back_inserter(feature_ptrs));
+
+  Functor functor(std::move(features));
+
+  std::vector<DualNet::Output*> output_ptrs;
+  output_ptrs.reserve(feature_ptrs.size());
+  CopyPointers(functor.outputs.begin(), feature_ptrs.size(),
+               std::back_inserter(output_ptrs));
+
+  auto future = functor.promise.get_future();
+  RunManyAsync(std::move(feature_ptrs), std::move(output_ptrs),
+               Continuation(std::move(functor)));
+  return future.get();
+}
 
 void DualNet::SetFeatures(absl::Span<const Position::Stones* const> history,
                           Color to_play, BoardFeatures* features) {
@@ -63,7 +123,5 @@ void DualNet::SetFeatures(absl::Span<const Position::Stones* const> history,
     dst += kNumStoneFeatures;
   }
 }
-
-DualNet::~DualNet() = default;
 
 }  // namespace minigo
