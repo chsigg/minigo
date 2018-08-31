@@ -40,11 +40,26 @@ static constexpr char kAlmostDoneBoard[] = R"(
     XXXXXOOOO
     XXXXOOOOO)";
 
-class TestablePlayer : public MctsPlayer {
+// Helper class so that the TestablePlayer destroys the service *after* the
+// MctsPlayer base class.
+class WithService {
+ public:
+  WithService(std::unique_ptr<DualNet::Service> service)
+      : service_(std::move(service)) {}
+  virtual ~WithService() = default;
+
+ protected:
+  std::unique_ptr<DualNet::Service> service_;
+};
+
+class TestablePlayer : WithService, public MctsPlayer {
+  TestablePlayer(const TestablePlayer&) = delete;
+  TestablePlayer& operator=(const TestablePlayer&) = delete;
+
  public:
   TestablePlayer(std::unique_ptr<DualNet::Service> service,
                  const Options& options)
-      : MctsPlayer(service.get(), options), service_(std::move(service)) {}
+      : WithService(std::move(service)), MctsPlayer(service_.get(), options) {}
 
   using MctsPlayer::InitializeGame;
   using MctsPlayer::PickMove;
@@ -67,9 +82,6 @@ class TestablePlayer : public MctsPlayer {
     mutable_options()->virtual_losses = virtual_losses;
     return TreeSearch();
   }
-
- private:
-  std::unique_ptr<DualNet::Service> service_;
 };
 
 std::unique_ptr<TestablePlayer> CreatePlayer(
