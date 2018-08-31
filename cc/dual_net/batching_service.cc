@@ -1,6 +1,7 @@
 #include "cc/dual_net/batching_service.h"
 
 #include "absl/memory/memory.h"
+#include "absl/synchronization/mutex.h"
 #include "cc/check.h"
 
 namespace minigo {
@@ -49,19 +50,19 @@ class BatchingService : public DualNet::Service {
   }
 
   void IncrementClientCount() override {
-    std::lock_guard<std::mutex> lock(mutex_);
+    absl::MutexLock lock(&mutex_);
     ++num_clients_;
   }
 
   void DecrementClientCount() override {
-    std::lock_guard<std::mutex> lock(mutex_);
+    absl::MutexLock lock(&mutex_);
     if (--num_clients_ > 0 || queue_counter_ > run_counter_) {
       MaybeRunBatches();
     }
   }
 
   void FlushClient() override {
-    std::lock_guard<std::mutex> lock(mutex_);
+    absl::MutexLock lock(&mutex_);
     flush_queue_.push(queue_counter_);
     MaybeRunBatches();
   }
@@ -72,7 +73,7 @@ class BatchingService : public DualNet::Service {
     InferenceData inference = {std::move(features)};
     auto future = inference.promise.get_future();
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    absl::MutexLock lock(&mutex_);
     size_t num_features = inference.features.size();
     MG_CHECK(num_features > 0) << "Empty features not supported.";
     queue_counter_ += num_features;
@@ -176,7 +177,7 @@ class BatchingService : public DualNet::Service {
     ++num_runs_;
   }
 
-  std::mutex mutex_;
+  absl::Mutex mutex_;
 
   size_t num_clients_ GUARDED_BY(&mutex_);
   // Values of queue_counter_ when FlushClient() was called.

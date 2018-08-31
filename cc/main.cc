@@ -206,7 +206,8 @@ void WriteSgf(const std::string& output_dir, const std::string& output_name,
     }
   }
 
-  std::string player_name(file::Basename(FLAGS_model));
+  std::string player_name =
+      static_cast<std::string>(file::Basename(FLAGS_model));
   sgf::CreateSgfOptions options;
   options.komi = player_b.options().komi;
   options.result = player_b.result_string();
@@ -241,7 +242,7 @@ class SelfPlayer {
  public:
   void Run() {
     auto start_time = absl::Now();
-    network_ = NewDualNetService(FLAGS_model);
+    factory_ = NewDualNetClientFactory(FLAGS_model);
     std::cerr << "DualNet service created from " << FLAGS_model << " in "
               << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
               << std::endl;
@@ -354,7 +355,7 @@ class SelfPlayer {
                "Use --checkpoint_dir and --engine=remote to perform inference "
                "using the most recent checkpoint from training.";
         game_options.Init(thread_id, &rnd_);
-        player = absl::make_unique<MctsPlayer>(network_.get(),
+        player = absl::make_unique<MctsPlayer>(factory_->New(),
                                                game_options.player_options);
       }
 
@@ -448,7 +449,7 @@ class SelfPlayer {
     }
   }
 
-  std::unique_ptr<DualNet::Service> network_;
+  std::unique_ptr<DualNet::ClientFactory> factory_;
 
   absl::Mutex mutex_;
   Random rnd_ GUARDED_BY(&mutex_);
@@ -469,12 +470,12 @@ void Eval() {
   options.random_symmetry = true;
 
   options.name = std::string(file::Stem(FLAGS_model));
-  auto black_network = NewDualNetService(FLAGS_model);
-  auto black = absl::make_unique<MctsPlayer>(black_network.get(), options);
+  auto black_factory = NewDualNetClientFactory(FLAGS_model);
+  auto black = absl::make_unique<MctsPlayer>(black_factory->New(), options);
 
   options.name = std::string(file::Stem(FLAGS_model_two));
-  auto white_network = NewDualNetService(FLAGS_model_two);
-  auto white = absl::make_unique<MctsPlayer>(white_network.get(), options);
+  auto white_factory = NewDualNetClientFactory(FLAGS_model_two);
+  auto white = absl::make_unique<MctsPlayer>(white_factory->New(), options);
 
   auto* player = black.get();
   auto* other_player = white.get();
@@ -505,8 +506,8 @@ void Gtp() {
   options.name = absl::StrCat("minigo-", file::Basename(FLAGS_model));
   options.ponder_limit = FLAGS_ponder_limit;
   options.courtesy_pass = FLAGS_courtesy_pass;
-  auto dual_net_service = NewDualNetService(FLAGS_model);
-  auto player = absl::make_unique<GtpPlayer>(dual_net_service.get(), options);
+  auto factory = NewDualNetClientFactory(FLAGS_model);
+  auto player = absl::make_unique<GtpPlayer>(factory->New(), options);
   player->Run();
 }
 

@@ -146,6 +146,7 @@ minigo_cc_library(
         "//cc:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
+        "@com_google_absl//absl/synchronization",
     ],
 )
 

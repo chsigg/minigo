@@ -54,9 +54,7 @@ DECLARE_int32(virtual_losses);
 
 namespace minigo {
 
-DualNetFactory::~DualNetFactory() = default;
-
-std::unique_ptr<DualNet::Service> NewDualNetService(
+std::unique_ptr<DualNet::ClientFactory> NewDualNetClientFactory(
     const std::string& model_path) {
   std::unique_ptr<DualNet> dual_net;
 
@@ -96,12 +94,14 @@ std::unique_ptr<DualNet::Service> NewDualNetService(
     MG_FATAL() << "Unrecognized inference engine \"" << FLAGS_engine << "\"";
   }
 
-  if (FLAGS_batch_size > 0) {
-    // Batching was requested, return BatchingService.
-    return NewBatchingService(std::move(dual_net));
-  }
+  std::unique_ptr<DualNet::Service> service = [&] {
+    if (FLAGS_batch_size > 0) {
+      return NewBatchingService(std::move(dual_net));
+    }
+    return absl::make_unique<DualNet::Service>(std::move(dual_net));
+  }();
 
-  return absl::make_unique<DualNet::Service>(std::move(dual_net));
+  return absl::make_unique<DualNet::ClientFactory>(std::move(service));
 }
 
 }  // namespace minigo

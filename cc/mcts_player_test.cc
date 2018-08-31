@@ -42,24 +42,26 @@ static constexpr char kAlmostDoneBoard[] = R"(
 
 // Helper class so that the TestablePlayer destroys the service *after* the
 // MctsPlayer base class.
-class WithService {
+class ServiceWrapper {
  public:
-  WithService(std::unique_ptr<DualNet::Service> service)
+  ServiceWrapper(std::unique_ptr<DualNet::Service> service)
       : service_(std::move(service)) {}
-  virtual ~WithService() = default;
+  virtual ~ServiceWrapper() = default;
 
  protected:
   std::unique_ptr<DualNet::Service> service_;
 };
 
-class TestablePlayer : WithService, public MctsPlayer {
+class TestablePlayer : ServiceWrapper, public MctsPlayer {
   TestablePlayer(const TestablePlayer&) = delete;
   TestablePlayer& operator=(const TestablePlayer&) = delete;
 
  public:
   TestablePlayer(std::unique_ptr<DualNet::Service> service,
                  const Options& options)
-      : WithService(std::move(service)), MctsPlayer(service_.get(), options) {}
+      : ServiceWrapper(std::move(service)),
+        MctsPlayer(absl::make_unique<DualNet::Client>(service_.get()),
+                   options) {}
 
   using MctsPlayer::InitializeGame;
   using MctsPlayer::PickMove;

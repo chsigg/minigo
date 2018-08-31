@@ -16,6 +16,7 @@
 
 #include <vector>
 
+#include "absl/memory/memory.h"
 #include "cc/color.h"
 #include "cc/constants.h"
 
@@ -58,6 +59,28 @@ std::future<DualNet::Result> DualNet::Service::RunManyAsync(
                           Continuation(std::move(functor)));
   return future;
 }
+
+DualNet::Client::Client(DualNet::Service* service) : service_(service) {
+  service_->IncrementClientCount();
+}
+
+DualNet::Client::~Client() { service_->DecrementClientCount(); }
+
+DualNet::ClientFactory::ClientFactory(std::unique_ptr<DualNet::Service> service)
+    : service_(std::move(service)) {}
+
+std::unique_ptr<DualNet::Client> DualNet::ClientFactory::New() {
+  return absl::make_unique<Client>(service_.get());
+}
+
+std::future<DualNet::Result> DualNet::Client::RunManyAsync(
+    std::vector<DualNet::BoardFeatures>&& features) {
+  auto future = service_->RunManyAsync(std::move(features));
+  service_->FlushClient();
+  return future;
+}
+
+DualNet::Service* DualNet::Client::service() const { return service_; }
 
 DualNet::DualNet(const std::string& model_path) : model_path_(model_path) {}
 

@@ -90,13 +90,12 @@ class DualNet {
     Client& operator=(const Client&) = delete;
 
    public:
-    explicit Client(Service* service) : service_(service) {
-      service_->IncrementClientCount();
-    }
+    explicit Client(Service* service);
+    ~Client();
 
-    ~Client() { service_->DecrementClientCount(); }
+    Service* service() const;
 
-    void Flush() { service_->FlushClient(); }
+    std::future<Result> RunManyAsync(std::vector<BoardFeatures>&& features);
 
    private:
     Service* service_;  // Not owned.
@@ -117,6 +116,16 @@ class DualNet {
     std::vector<BoardFeatures> features;
     std::vector<Output> outputs;
     std::promise<Result> promise;
+  };
+
+  class ClientFactory {
+   public:
+    explicit ClientFactory(std::unique_ptr<Service> service);
+
+    std::unique_ptr<DualNet::Client> New();
+
+   private:
+    std::unique_ptr<Service> service_;
   };
 
   class Continuation {
@@ -179,23 +188,6 @@ class DualNet {
 
  protected:
   std::string model_path_;
-};
-
-// TODO(csigg): refactor dual-threading out of Trt/TfDualNet, change factory
-// to create a service interface instance. The DualNet should be a concrete
-// class referencing a service.
-
-class DualNetFactory {
- public:
-  explicit DualNetFactory(std::string model_path)
-      : model_path_(std::move(model_path)) {}
-  virtual ~DualNetFactory();
-  virtual std::unique_ptr<DualNet> New() = 0;
-
-  const std::string& model() const { return model_path_; }
-
- private:
-  const std::string model_path_;
 };
 
 }  // namespace minigo

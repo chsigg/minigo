@@ -97,7 +97,7 @@ class MctsPlayer {
   // If position is non-null, the player will be initilized with that board
   // state. Otherwise, the player is initialized with an empty board with black
   // to play.
-  MctsPlayer(DualNet::Service* network, const Options& options);
+  MctsPlayer(std::unique_ptr<DualNet::Client> client, const Options& options);
 
   virtual ~MctsPlayer();
 
@@ -157,7 +157,7 @@ class MctsPlayer {
 
   std::string FormatScore(float score) const;
 
-  DualNet::Service* network() { return network_; }
+  DualNet::Service* network() { return client_->service(); }
 
   // Run inference for the given leaf nodes & incorportate the inference output.
   void ProcessLeaves(const std::vector<MctsNode*>& leaves);
@@ -165,8 +165,7 @@ class MctsPlayer {
  private:
   void PushHistory(Coord c);
 
-  DualNet::Service* network_;  // Not owned.
-  DualNet::Client client_;
+  std::unique_ptr<DualNet::Client> client_;
   int temperature_cutoff_;
 
   MctsNode::EdgeStats dummy_stats_;
