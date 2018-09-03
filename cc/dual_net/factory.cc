@@ -53,8 +53,36 @@ DEFINE_string(engine, MG_DEFAULT_ENGINE,
 DECLARE_int32(virtual_losses);
 
 namespace minigo {
+namespace {
+// Simple service which forwards to the DualNet without any batching.
+class DualNetService : public DualNet::Service {
+  class DualNetClient : public DualNet::Client {
+   public:
+    explicit DualNetClient(DualNet* dual_net) : dual_net_(dual_net) {}
 
-std::unique_ptr<DualNet::ClientFactory> NewDualNetClientFactory(
+    DualNet::Result RunMany(
+        std::vector<DualNet::BoardFeatures>&& features) override {
+      return dual_net_->RunMany({std::move(features)}).front();
+    }
+
+   protected:
+    DualNet* dual_net_;
+  };
+
+ public:
+  explicit DualNetService(std::unique_ptr<DualNet> dual_net)
+      : dual_net_(std::move(dual_net)) {}
+
+  std::unique_ptr<DualNet::Client> New() override {
+    return absl::make_unique<DualNetClient>(dual_net_.get());
+  }
+
+ private:
+  std::unique_ptr<DualNet> dual_net_;
+};
+}  // namespace
+
+std::unique_ptr<DualNet::Service> NewDualNetService(
     const std::string& model_path) {
   std::unique_ptr<DualNet> dual_net;
 
@@ -94,14 +122,11 @@ std::unique_ptr<DualNet::ClientFactory> NewDualNetClientFactory(
     MG_FATAL() << "Unrecognized inference engine \"" << FLAGS_engine << "\"";
   }
 
-  std::unique_ptr<DualNet::Service> service = [&] {
-    if (FLAGS_batch_size > 0) {
-      return NewBatchingService(std::move(dual_net));
-    }
-    return absl::make_unique<DualNet::Service>(std::move(dual_net));
-  }();
+  if (FLAGS_batch_size == 0) {
+    return absl::make_unique<DualNetService>(std::move(dual_net));
+  }
 
-  return absl::make_unique<DualNet::ClientFactory>(std::move(service));
+  return NewBatchingService(std::move(dual_net));
 }
 
 }  // namespace minigo

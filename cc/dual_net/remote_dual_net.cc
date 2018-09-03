@@ -63,9 +63,13 @@ namespace {
 // InferenceService.
 class RemoteDualNet : public DualNet, InferenceService::Service {
   struct InferenceData {
-    std::vector<const BoardFeatures*> features;
-    std::vector<Output*> outputs;
-    Continuation continuation;
+    std::vector<std::vector<BoardFeatures>> feature_vecs;
+    std::promise<std::vector<Result>> promise;
+  };
+
+  struct PendingData {
+    std::vector<size_t> feature_counts;
+    std::promise<std::vector<Result>> promise;
   };
 
  public:
@@ -113,11 +117,12 @@ class RemoteDualNet : public DualNet, InferenceService::Service {
     worker_thread_.join();
   }
 
-  void RunManyAsync(std::vector<const BoardFeatures*>&& features,
-                    std::vector<Output*>&& outputs,
-                    Continuation continuation) override {
-    queue_.Push(
-        {std::move(features), std::move(outputs), std::move(continuation)});
+  std::vector<Result> RunMany(
+      std::vector<std::vector<BoardFeatures>>&& feature_vecs) override {
+    std::promise<std::vector<Result>> promise;
+    auto future = promise.get_future();
+    queue_.Push({std::move(feature_vecs), std::move(promise)});
+    return future.get();
   }
 
  private:
@@ -137,18 +142,25 @@ class RemoteDualNet : public DualNet, InferenceService::Service {
       }
     }
 
+    std::vector<size_t> feature_counts;
+    feature_counts.reserve(inference.feature_vecs.size());
     std::string byte_features(FLAGS_batch_size * DualNet::kNumBoardFeatures, 0);
     auto it = byte_features.begin();
-    for (const auto* features : inference.features) {
-      it = std::transform(features->begin(), features->end(), it,
-                          [](float x) { return x != 0.0f ? 1 : 0; });
+    for (const auto& features : inference.feature_vecs) {
+      for (const auto& feature : features) {
+        it = std::transform(feature.begin(), feature.end(), it,
+                            [](float x) { return x != 0.0f ? 1 : 0; });
+      }
+      feature_counts.push_back(features.size());
     }
     response->set_batch_id(batch_id_++);
     response->set_features(std::move(byte_features));
 
     {
       absl::MutexLock lock(&pending_mutex_);
-      pending_map_[response->batch_id()] = std::move(inference);
+      pending_map_.emplace(
+          response->batch_id(),
+          PendingData{std::move(feature_counts), std::move(inference.promise)});
     }
 
     return Status::OK;
@@ -156,7 +168,7 @@ class RemoteDualNet : public DualNet, InferenceService::Service {
 
   Status PutOutputs(ServerContext* context, const PutOutputsRequest* request,
                     PutOutputsResponse* /*response*/) override {
-    InferenceData inference;
+    PendingData inference;
     {
       absl::MutexLock lock(&pending_mutex_);
       auto it = pending_map_.find(request->batch_id());
@@ -176,13 +188,20 @@ class RemoteDualNet : public DualNet, InferenceService::Service {
 
     auto policy_it = request->policy().begin();
     auto value_it = request->value().begin();
-    for (auto* outputs : inference.outputs) {
-      std::copy_n(policy_it, outputs->policy.size(), outputs->policy.begin());
-      policy_it += outputs->policy.size();
-      outputs->value = *value_it++;
-    }
+    std::vector<Result> results;
+    results.reserve(inference.feature_counts.size());
+    for (size_t num_features : inference.feature_counts) {
+      std::vector<Policy> policies(num_features);
+      std::copy_n(policy_it, kNumMoves * num_features, policies.front().data());
+      policy_it += kNumMoves * num_features;
 
-    inference.continuation(request->model_path());
+      std::vector<float> values(num_features);
+      std::copy_n(value_it, num_features, values.data());
+      value_it += num_features;
+
+      results.push_back({std::move(policies), std::move(values), model_path_});
+    }
+    inference.promise.set_value(results);
 
     return Status::OK;
   }
@@ -200,8 +219,8 @@ class RemoteDualNet : public DualNet, InferenceService::Service {
   // Mutex that protects access to pending_map_.
   absl::Mutex pending_mutex_;
 
-  // Map from batch ID to list of remote inference requests in that batch.
-  std::unordered_map<int32_t, InferenceData> pending_map_
+  // Map from batch ID to list of remote inference request sizes in that batch.
+  std::unordered_map<int32_t, PendingData> pending_map_
       GUARDED_BY(&pending_mutex_);
 };
 

@@ -26,13 +26,20 @@ FakeDualNet::FakeDualNet(float value)
 FakeDualNet::FakeDualNet(std::vector<float> priors, float value)
     : DualNet("FakeDualNet"), priors_(std::move(priors)), value_(value) {}
 
-void FakeDualNet::RunManyAsync(std::vector<const BoardFeatures*>&& features,
-                               std::vector<Output*>&& outputs,
-                               Continuation continuation) {
-  for (auto* output : outputs) {
-    std::copy(priors_.begin(), priors_.end(), output->policy.begin());
-    output->value = value_;
+std::vector<DualNet::Result> FakeDualNet::RunMany(
+    std::vector<std::vector<BoardFeatures>>&& feature_vecs) {
+  std::vector<DualNet::Result> results;
+  results.reserve(feature_vecs.size());
+  for (const auto& features : feature_vecs) {
+    size_t num_features = features.size();
+    std::vector<Policy> policies(num_features);
+    for (auto& policy : policies) {
+      std::copy(priors_.begin(), priors_.end(), policy.begin());
+    }
+    std::vector<float> values(num_features, value_);
+
+    results.push_back({std::move(policies), std::move(values), model_path_});
   }
-  continuation(model_path_);
+  return results;
 }
 }  // namespace minigo

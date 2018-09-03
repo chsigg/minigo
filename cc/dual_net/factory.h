@@ -9,7 +9,7 @@
 
 namespace minigo {
 
-std::unique_ptr<DualNet::ClientFactory> NewDualNetClientFactory(
+std::unique_ptr<DualNet::Service> NewDualNetService(
     const std::string& model_path);
 
 }  // namespace minigo

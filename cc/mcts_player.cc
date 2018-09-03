@@ -364,7 +364,7 @@ void MctsPlayer::ProcessLeaves(const std::vector<MctsNode*>& leaves) {
         symmetries_used_[i], raw_features.data(), features[i].data());
   }
 
-  auto result = std::move(client_->RunManyAsync(std::move(features)).get());
+  auto result = client_->RunMany(std::move(features));
 
   // Record some information about the inference.
   if (!result.model.empty()) {
@@ -377,15 +377,14 @@ void MctsPlayer::ProcessLeaves(const std::vector<MctsNode*>& leaves) {
 
   // Incorporate the inference outputs back into tree search, undoing any
   // previously applied random symmetries.
-  std::array<float, kNumMoves> raw_policy;
+  DualNet::Policy raw_policy;
   for (size_t i = 0; i < leaves.size(); ++i) {
     MctsNode* leaf = leaves[i];
-    const auto& output = result.outputs[i];
     symmetry::ApplySymmetry<float, kN, 1>(
-        symmetry::Inverse(symmetries_used_[i]), output.policy.data(),
+        symmetry::Inverse(symmetries_used_[i]), result.policies[i].data(),
         raw_policy.data());
-    raw_policy[Coord::kPass] = output.policy[Coord::kPass];
-    leaf->IncorporateResults(absl::MakeConstSpan(raw_policy), output.value,
+    raw_policy[Coord::kPass] = result.policies[i][Coord::kPass];
+    leaf->IncorporateResults(absl::MakeConstSpan(raw_policy), result.values[i],
                              root_);
   }
 }

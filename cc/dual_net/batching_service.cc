@@ -7,27 +7,21 @@
 namespace minigo {
 namespace {
 class BatchingService : public DualNet::Service {
-  struct SharedFunctor {
-    DualNet::Functor functor;
-    std::atomic<size_t> num_remaining;
-  };
-
-  struct BatchFunctor {
-    void operator()(const std::string& model) {
-      for (auto& functor : functors) {
-        functor(model);
-      }
-      for (size_t i = 0; i < shared_functors.size(); ++i) {
-        const auto& shared_functor = shared_functors[i];
-        if (!(shared_functor->num_remaining -= shared_num_features[i])) {
-          shared_functor->functor(model);
-        }
-      }
+  class BatchingClient : public DualNet::Client {
+   public:
+    BatchingClient(BatchingService* service) : service_(service) {
+      service_->IncrementClientCount();
     }
 
-    std::vector<DualNet::Functor> functors;
-    std::vector<std::shared_ptr<SharedFunctor>> shared_functors;
-    std::vector<size_t> shared_num_features;
+    ~BatchingClient() override { service_->DecrementClientCount(); }
+
+    DualNet::Result RunMany(
+        std::vector<DualNet::BoardFeatures>&& features) override {
+      return service_->RunMany(std::move(features));
+    }
+
+   private:
+    BatchingService* service_;
   };
 
   struct InferenceData {
@@ -37,11 +31,10 @@ class BatchingService : public DualNet::Service {
 
  public:
   explicit BatchingService(std::unique_ptr<DualNet> dual_net)
-      : Service(std::move(dual_net)),
+      : dual_net_(std::move(dual_net)),
         num_clients_(0),
         queue_counter_(0),
         run_counter_(0),
-        shared_size_(0),
         num_runs_(0) {}
 
   ~BatchingService() override {
@@ -49,139 +42,87 @@ class BatchingService : public DualNet::Service {
               << static_cast<float>(run_counter_) / num_runs_ << ".\n";
   }
 
-  void IncrementClientCount() override {
+  std::unique_ptr<DualNet::Client> New() override {
+    return absl::make_unique<BatchingClient>(this);
+  }
+
+ private:
+  void IncrementClientCount() {
     absl::MutexLock lock(&mutex_);
     ++num_clients_;
   }
 
-  void DecrementClientCount() override {
+  void DecrementClientCount() {
     absl::MutexLock lock(&mutex_);
-    if (--num_clients_ > 0 || queue_counter_ > run_counter_) {
-      MaybeRunBatches();
-    }
-  }
-
-  void FlushClient() override {
-    absl::MutexLock lock(&mutex_);
-    flush_queue_.push(queue_counter_);
+    --num_clients_;
     MaybeRunBatches();
   }
 
   // Runs inference on a batch of input features aynchronously.
-  std::future<DualNet::Result> RunManyAsync(
-      std::vector<DualNet::BoardFeatures>&& features) override {
-    InferenceData inference = {std::move(features)};
-    auto future = inference.promise.get_future();
+  DualNet::Result RunMany(std::vector<DualNet::BoardFeatures>&& features) {
+    size_t num_features = features.size();
+    MG_CHECK(num_features >= static_cast<size_t>(FLAGS_batch_size));
 
-    absl::MutexLock lock(&mutex_);
-    size_t num_features = inference.features.size();
-    MG_CHECK(num_features > 0) << "Empty features not supported.";
-    queue_counter_ += num_features;
-    inference_queue_.push(std::move(inference));
-    MaybeRunBatches();
+    std::promise<DualNet::Result> promise;
+    auto future = promise.get_future();
 
-    return future;
+    {
+      absl::MutexLock lock(&mutex_);
+      queue_counter_ += num_features;
+      inference_queue_.push({std::move(features), std::move(promise)});
+      MaybeRunBatches();
+    }
+
+    return future.get();
   }
 
- private:
   void MaybeRunBatches() EXCLUSIVE_LOCKS_REQUIRED(queue_mutex) {
-    for (;;) {
-      size_t batch_size = std::min(queue_counter_ - run_counter_,
-                                   static_cast<size_t>(FLAGS_batch_size));
-
+    while (size_t batch_size =
+               std::min(queue_counter_ - run_counter_,
+                        static_cast<size_t>(FLAGS_batch_size))) {
       // Stop if we won't fill a batch yet but more request will come.
       if (static_cast<int>(batch_size) < FLAGS_batch_size &&
-          num_clients_ > flush_queue_.size()) {
+          num_clients_ > inference_queue_.size()) {
         break;
       }
 
-      if (batch_size) {
-        RunBatch(batch_size);
-      }
-
-      // Take elements from flush queue which were scheduled to run.
-      while (!flush_queue_.empty() && flush_queue_.front() <= run_counter_) {
-        flush_queue_.pop();
-      }
+      RunBatch(batch_size);
     }
   }
 
   void RunBatch(size_t batch_size) {
-    /*
-    std::cerr << "Assembling batch (games = " << inference_queue_.size()
-              << ", features = " << batch_size
-              << ", size = " << FLAGS_batch_size << ")" << std::endl;
-    */
-    run_counter_ += batch_size;
+    std::vector<std::vector<DualNet::BoardFeatures>> features;
+    std::vector<std::promise<DualNet::Result>> promises;
 
-    BatchFunctor batch_functor;
-
-    std::vector<const DualNet::BoardFeatures*> feature_ptrs;
-    std::vector<DualNet::Output*> output_ptrs;
-    feature_ptrs.reserve(FLAGS_batch_size);
-    output_ptrs.reserve(FLAGS_batch_size);
-    auto feature_inserter = std::back_inserter(feature_ptrs);
-    auto output_inserter = std::back_inserter(output_ptrs);
-
-    MG_CHECK(batch_size > 0);
     while (batch_size > 0) {
-      // Consume features in shared_functor_ first.
-      if (shared_functor_) {
-        size_t num_features = std::min(shared_size_, batch_size);
-        batch_functor.shared_functors.push_back(shared_functor_);
-        batch_functor.shared_num_features.push_back(num_features);
-
-        shared_size_ -= num_features;
-        batch_size -= num_features;
-
-        DualNet::CopyPointers(
-            shared_functor_->functor.features.begin() + shared_size_,
-            num_features, feature_inserter);
-        DualNet::CopyPointers(
-            shared_functor_->functor.outputs.begin() + shared_size_,
-            num_features, output_inserter);
-
-        if (shared_size_ == 0) {
-          shared_functor_.reset();
-        }
-        continue;
-      }
-
-      auto inference = std::move(inference_queue_.front());
-      inference_queue_.pop();
+      auto& inference = inference_queue_.front();
       size_t num_features = inference.features.size();
-      DualNet::Functor functor(std::move(inference.features),
-                               std::move(inference.promise));
 
-      // If inference doesn't fit into the batch anymore, move it to shared
-      // functor and fill up the batch in the next iteration.
       if (num_features > batch_size) {
-        shared_size_ = num_features;
-        shared_functor_.reset(
-            new SharedFunctor{std::move(functor), {num_features}});
-        continue;
+        break;  // Request doesn't fit anymore.
       }
 
-      // Add entire inference to batch.
-      DualNet::CopyPointers(functor.features.begin(), num_features,
-                            feature_inserter);
-      DualNet::CopyPointers(functor.outputs.begin(), num_features,
-                            output_inserter);
-      batch_functor.functors.push_back(std::move(functor));
-      MG_CHECK(batch_size >= num_features);
+      features.push_back(std::move(inference.features));
+      promises.push_back(std::move(inference.promise));
+
+      inference_queue_.pop();
       batch_size -= num_features;
+      run_counter_ += num_features;
     }
 
-    dual_net_->RunManyAsync(std::move(feature_ptrs), std::move(output_ptrs),
-                            DualNet::Continuation(std::move(batch_functor)));
+    auto results = dual_net_->RunMany(std::move(features));
+    for (size_t i = 0; i < results.size(); ++i) {
+      promises[i].set_value(std::move(results[i]));
+    }
+
     ++num_runs_;
   }
+
+  std::unique_ptr<DualNet> dual_net_;
 
   absl::Mutex mutex_;
 
   size_t num_clients_ GUARDED_BY(&mutex_);
-  // Values of queue_counter_ when FlushClient() was called.
-  std::queue<size_t> flush_queue_ GUARDED_BY(&mutex_);
 
   std::queue<InferenceData> inference_queue_ GUARDED_BY(&mutex_);
   // Number of features pushed to queue
@@ -189,10 +130,7 @@ class BatchingService : public DualNet::Service {
   // Number of features pushed to dual net.
   size_t run_counter_ GUARDED_BY(&mutex_);
 
-  std::shared_ptr<SharedFunctor> shared_functor_ GUARDED_BY(&mutex_);
-  // Number of remaining features in shared_functor_.
-  size_t shared_size_ GUARDED_BY(&mutex_);
-
+  // For printing batching stats in the destructor only.
   size_t num_runs_ GUARDED_BY(&mutex_);
 };
 }  // namespace

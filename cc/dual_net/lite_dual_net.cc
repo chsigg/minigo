@@ -91,27 +91,34 @@ class LiteDualNet : public DualNet {
 
   ~LiteDualNet() override = default;
 
-  void RunManyAsync(std::vector<const BoardFeatures*>&& features,
-                    std::vector<Output*>&& outputs,
-                    Continuation continuation) override {
-    int batch_size = static_cast<int>(features.size());
-    auto* input_tensor = interpreter_->tensor(interpreter_->inputs()[0]);
-    MG_CHECK(input_tensor->dims->data[0] == batch_size);
+  std::vector<Result> RunMany(
+      std::vector<std::vector<BoardFeatures>>&& feature_vecs) override {
+    std::vector<Result> results;
+    results.reserve(feature_vecs.size());
+    for (const auto& features : feature_vecs) {
+      int num_features = static_cast<int>(features.size());
+      auto* input_tensor = interpreter_->tensor(interpreter_->inputs()[0]);
+      MG_CHECK(input_tensor->dims->data[0] == num_features);
 
-    auto* data = interpreter_->typed_input_tensor<float>(0);
-    memcpy(data, features.data(), features.size() * sizeof(BoardFeatures));
+      auto* data = interpreter_->typed_input_tensor<float>(0);
+      memcpy(data, features.data(), features.size() * sizeof(BoardFeatures));
 
-    MG_CHECK(interpreter_->Invoke() == kTfLiteOk);
+      MG_CHECK(interpreter_->Invoke() == kTfLiteOk);
 
-    auto* policy_data = interpreter_->typed_output_tensor<float>(policy_);
-    auto* value_data = interpreter_->typed_output_tensor<float>(value_);
-    for (int i = 0; i < batch_size; ++i) {
-      memcpy(outputs[i]->policy.data(), policy_data + i * kNumMoves,
-             sizeof(outputs[i]->policy));
-      outputs[i]->value = value_data[i];
+      auto* policy_data = interpreter_->typed_output_tensor<float>(policy_);
+      auto* value_data = interpreter_->typed_output_tensor<float>(value_);
+      std::vector<Policy> policies(num_features);
+      std::copy_n(policy_data, kNumMoves * num_features,
+                  policies.front().data());
+      policy_data += kNumMoves * num_features;
+
+      std::vector<float> values(num_features);
+      std::copy_n(value_data, num_features, values.data());
+      value_data += num_features;
+
+      results.push_back({std::move(policies), std::move(values), model_path_});
     }
-
-    continuation(model_path_);
+    return results;
   }
 
  private:

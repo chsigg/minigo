@@ -39,77 +39,96 @@ using tensorflow::TensorShape;
 namespace minigo {
 
 namespace {
-class TfWorker {
- public:
-  explicit TfWorker(const tensorflow::GraphDef& graph_def) {
-    tensorflow::SessionOptions options;
-    options.config.mutable_gpu_options()->set_allow_growth(true);
-    session_.reset(tensorflow::NewSession(options));
-    TF_CHECK_OK(session_->Create(graph_def));
-
-    inputs_.emplace_back("pos_tensor",
-                         tensorflow::Tensor(tensorflow::DT_FLOAT,
-                                            tensorflow::TensorShape(
-                                                {FLAGS_batch_size, kN, kN,
-                                                 DualNet::kNumStoneFeatures})));
-
-    output_names_.emplace_back("policy_output");
-    output_names_.emplace_back("value_output");
-  }
-
-  ~TfWorker() {
-    if (session_ != nullptr) {
-      TF_CHECK_OK(session_->Close());
-    }
-  }
-
-  void RunMany(const std::vector<const DualNet::BoardFeatures*>& features,
-               const std::vector<DualNet::Output*>& outputs) {
-    // Copy the features into the input tensor.
-    auto* feature_data = inputs_.front().second.flat<float>().data();
-    for (const auto* feature : features) {
-      // Copy the features into the input tensor.
-      feature_data = std::copy(feature->begin(), feature->end(), feature_data);
-    }
-
-    // Run the model.
-    TF_CHECK_OK(session_->Run(inputs_, output_names_, {}, &outputs_));
-
-    // Copy the policy and value out of the output tensors.
-    const auto* policy_data = outputs_[0].flat<float>().data();
-    const auto* value_data = outputs_[1].flat<float>().data();
-    for (auto* output : outputs) {
-      std::copy_n(policy_data, kNumMoves, output->policy.begin());
-      policy_data += kNumMoves;
-      output->value = *value_data++;
-    }
-  }
-
- private:
-  std::unique_ptr<tensorflow::Session> session_;
-  std::vector<std::pair<std::string, tensorflow::Tensor>> inputs_;
-  std::vector<std::string> output_names_;
-  std::vector<tensorflow::Tensor> outputs_;
-};
-
 class TfDualNet : public DualNet {
+  class TfWorker {
+   public:
+    explicit TfWorker(const tensorflow::GraphDef& graph_def) {
+      tensorflow::SessionOptions options;
+      options.config.mutable_gpu_options()->set_allow_growth(true);
+      session_.reset(tensorflow::NewSession(options));
+      TF_CHECK_OK(session_->Create(graph_def));
+
+      inputs_.emplace_back(
+          "pos_tensor",
+          tensorflow::Tensor(tensorflow::DT_FLOAT,
+                             tensorflow::TensorShape({FLAGS_batch_size, kN, kN,
+                                                      kNumStoneFeatures})));
+
+      output_names_.emplace_back("policy_output");
+      output_names_.emplace_back("value_output");
+    }
+
+    ~TfWorker() {
+      if (session_ != nullptr) {
+        TF_CHECK_OK(session_->Close());
+      }
+    }
+
+    std::vector<Result> RunMany(
+        std::vector<std::vector<BoardFeatures>>&& feature_vecs) {
+      // Copy the features into the input tensor.
+      auto* feature_data = inputs_.front().second.flat<float>().data();
+      std::vector<size_t> feature_counts;
+      feature_counts.reserve(feature_vecs.size());
+      for (const auto& features : feature_vecs) {
+        // Copy the features into the input tensor.
+        for (const auto& feature : features) {
+          feature_data =
+              std::copy(feature.begin(), feature.end(), feature_data);
+        }
+        feature_counts.push_back(features.size());
+      }
+      // Deallocate feature_vecs memory.
+      std::vector<std::vector<BoardFeatures>>().swap(feature_vecs);
+
+      // Run the model.
+      TF_CHECK_OK(session_->Run(inputs_, output_names_, {}, &outputs_));
+
+      // Copy the policies and values from the output tensors.
+      const auto* policy_data = outputs_[0].flat<float>().data();
+      const auto* value_data = outputs_[1].flat<float>().data();
+      std::vector<Result> results;
+      results.reserve(feature_counts.size());
+      for (size_t num_features : feature_counts) {
+        std::vector<Policy> policies(num_features);
+        std::copy_n(policy_data, kNumMoves * num_features,
+                    policies.front().data());
+        policy_data += kNumMoves * num_features;
+
+        std::vector<float> values(num_features);
+        std::copy_n(value_data, num_features, values.data());
+        value_data += num_features;
+
+        results.push_back({std::move(policies), std::move(values)});
+      }
+      return results;
+    }
+
+   private:
+    std::unique_ptr<tensorflow::Session> session_;
+    std::vector<std::pair<std::string, tensorflow::Tensor>> inputs_;
+    std::vector<std::string> output_names_;
+    std::vector<tensorflow::Tensor> outputs_;
+  };
+
   struct InferenceData {
-    std::vector<const BoardFeatures*> features;
-    std::vector<Output*> outputs;
-    Continuation continuation;
+    std::vector<std::vector<BoardFeatures>> feature_vecs;
+    std::promise<std::vector<Result>> promise;
   };
 
  public:
   explicit TfDualNet(std::string model_path)
       : DualNet(model_path), running_(true) {
     auto functor = [this](const tensorflow::GraphDef& graph_def) {
-      pthread_setname_np(pthread_self(), "TfWorker");
       TfWorker worker(graph_def);
       while (running_) {
         InferenceData inference;
         if (queue_.PopWithTimeout(&inference, absl::Seconds(1))) {
-          worker.RunMany(inference.features, inference.outputs);
-          inference.continuation(model_path_);
+          auto results = worker.RunMany(std::move(inference.feature_vecs));
+          for (auto& result : results) {
+            result.model = model_path_;
+          }
+          inference.promise.set_value(results);
         }
       }
     };
@@ -139,11 +158,12 @@ class TfDualNet : public DualNet {
     }
   }
 
-  void RunManyAsync(std::vector<const BoardFeatures*>&& features,
-                    std::vector<Output*>&& outputs,
-                    Continuation continuation) override {
-    queue_.Push(
-        {std::move(features), std::move(outputs), std::move(continuation)});
+  std::vector<Result> RunMany(
+      std::vector<std::vector<BoardFeatures>>&& feature_vecs) override {
+    std::promise<std::vector<Result>> promise;
+    auto future = promise.get_future();
+    queue_.Push({std::move(feature_vecs), std::move(promise)});
+    return future.get();
   }
 
  private:

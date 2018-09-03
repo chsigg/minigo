@@ -157,7 +157,7 @@ class MctsPlayer {
 
   std::string FormatScore(float score) const;
 
-  DualNet::Service* network() { return client_->service(); }
+  DualNet::Client* client() { return client_.get(); }
 
   // Run inference for the given leaf nodes & incorportate the inference output.
   void ProcessLeaves(const std::vector<MctsNode*>& leaves);

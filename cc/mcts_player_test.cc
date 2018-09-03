@@ -76,8 +76,8 @@ class TestablePlayer : ServiceWrapper, public MctsPlayer {
     return noise;
   }
 
-  DualNet::Output Run(const DualNet::BoardFeatures& features) {
-    return network()->RunManyAsync({features}).get().outputs.front();
+  DualNet::Result Run(const DualNet::BoardFeatures& features) {
+    return client()->RunMany({features});
   }
 
   std::vector<MctsNode*> TreeSearch(int virtual_losses) {
@@ -103,9 +103,9 @@ std::unique_ptr<TestablePlayer> CreateBasicPlayer(MctsPlayer::Options options) {
       &player->root()->position.stones()};
   DualNet::SetFeatures(absl::MakeConstSpan(positions), Color::kBlack,
                        &features);
-  auto output = player->Run(features);
-  first_node->IncorporateResults(absl::MakeSpan(output.policy), output.value,
-                                 player->root());
+  auto result = player->Run(features);
+  first_node->IncorporateResults(absl::MakeSpan(result.policies.front()),
+                                 result.values.front(), player->root());
   return player;
 }
 
@@ -414,17 +414,25 @@ class MergeFeaturesNet : public DualNet {
  public:
   MergeFeaturesNet() : DualNet("MergeFeaturesNet") {}
 
-  void RunManyAsync(std::vector<const BoardFeatures*>&& features,
-                    std::vector<Output*>&& outputs,
-                    Continuation continuation) override {
-    for (size_t i = 0; i < features.size(); ++i) {
-      Run(*features[i], outputs[i]);
+  std::vector<Result> RunMany(
+      std::vector<std::vector<BoardFeatures>>&& feature_vecs) override {
+    std::vector<Result> results;
+    results.reserve(feature_vecs.size());
+    for (const auto& features : feature_vecs) {
+      std::vector<Policy> policies;
+      policies.reserve(features.size());
+      for (const auto& feature : features) {
+        policies.push_back(Run(feature));
+      }
+      std::vector<float> values(features.size(), 0.0f);
+      results.push_back({std::move(policies), std::move(values), model_path_});
     }
-    continuation(model_path_);
+    return results;
   }
 
  private:
-  void Run(const BoardFeatures& features, Output* output) {
+  Policy Run(const BoardFeatures& features) {
+    Policy policy;
     for (int c = 0; c < kN * kN; ++c) {
       bool present = false;
       for (const auto n : kNeighborCoords[c]) {
@@ -435,10 +443,10 @@ class MergeFeaturesNet : public DualNet {
           }
         }
       }
-      output->policy[c] = 0.01 * present;
+      policy[c] = 0.01 * present;
     }
-    output->policy[Coord::kPass] = 0.0;
-    output->value = 0.0;
+    policy[Coord::kPass] = 0.0;
+    return policy;
   }
 };
 
