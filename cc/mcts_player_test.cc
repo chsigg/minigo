@@ -40,27 +40,27 @@ static constexpr char kAlmostDoneBoard[] = R"(
     XXXXXOOOO
     XXXXOOOOO)";
 
-// Helper class so that the TestablePlayer destroys the service *after* the
-// MctsPlayer base class.
-class ServiceWrapper {
+class TestClient : public DualNet::Client {
  public:
-  ServiceWrapper(std::unique_ptr<DualNet::Service> service)
-      : service_(std::move(service)) {}
-  virtual ~ServiceWrapper() = default;
+  TestClient(std::unique_ptr<DualNet> dual_net)
+      : dual_net_(std::move(dual_net)) {}
+
+  DualNet::Result RunMany(
+      std::vector<DualNet::BoardFeatures>&& features) override {
+    return dual_net_->RunMany({std::move(features)}).front();
+  }
 
  protected:
-  std::unique_ptr<DualNet::Service> service_;
+  std::unique_ptr<DualNet> dual_net_;
 };
 
-class TestablePlayer : ServiceWrapper, public MctsPlayer {
+class TestablePlayer : public MctsPlayer {
   TestablePlayer(const TestablePlayer&) = delete;
   TestablePlayer& operator=(const TestablePlayer&) = delete;
 
  public:
-  TestablePlayer(std::unique_ptr<DualNet::Service> service,
-                 const Options& options)
-      : ServiceWrapper(std::move(service)),
-        MctsPlayer(absl::make_unique<DualNet::Client>(service_.get()),
+  TestablePlayer(std::unique_ptr<DualNet> dual_net, const Options& options)
+      : MctsPlayer(absl::make_unique<TestClient>(std::move(dual_net)),
                    options) {}
 
   using MctsPlayer::InitializeGame;
@@ -88,8 +88,7 @@ class TestablePlayer : ServiceWrapper, public MctsPlayer {
 
 std::unique_ptr<TestablePlayer> CreatePlayer(
     std::unique_ptr<DualNet> dual_net, const MctsPlayer::Options& options) {
-  auto service = absl::make_unique<DualNet::Service>(std::move(dual_net));
-  return absl::make_unique<TestablePlayer>(std::move(service), options);
+  return absl::make_unique<TestablePlayer>(std::move(dual_net), options);
 }
 
 std::unique_ptr<TestablePlayer> CreateBasicPlayer(MctsPlayer::Options options) {

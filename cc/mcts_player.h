@@ -159,7 +159,7 @@ class MctsPlayer {
 
   DualNet::Client* client() { return client_.get(); }
 
-  // Run inference for the given leaf nodes & incorportate the inference output.
+  // Run inference for the given leaf nodes & incorporate the inference output.
   void ProcessLeaves(const std::vector<MctsNode*>& leaves);
 
  private:
