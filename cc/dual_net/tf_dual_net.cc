@@ -128,7 +128,7 @@ class TfDualNet : public DualNet {
           for (auto& result : results) {
             result.model = model_path_;
           }
-          inference.promise.set_value(results);
+          inference.promise.set_value(std::move(results));
         }
       }
     };

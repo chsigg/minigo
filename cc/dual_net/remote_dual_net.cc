@@ -201,7 +201,7 @@ class RemoteDualNet : public DualNet, InferenceService::Service {
 
       results.push_back({std::move(policies), std::move(values), model_path_});
     }
-    inference.promise.set_value(results);
+    inference.promise.set_value(std::move(results));
 
     return Status::OK;
   }

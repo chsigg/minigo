@@ -29,7 +29,11 @@ namespace minigo {
 constexpr int DualNet::kNumStoneFeatures;
 constexpr int DualNet::kNumBoardFeatures;
 
+DualNet::Client::Client() = default;
+
 DualNet::Client::~Client() = default;
+
+DualNet::Service::Service() = default;
 
 DualNet::Service::~Service() = default;
 

@@ -62,7 +62,7 @@ class DualNetService : public DualNet::Service {
 
     DualNet::Result RunMany(
         std::vector<DualNet::BoardFeatures>&& features) override {
-      return dual_net_->RunMany({std::move(features)}).front();
+      return std::move(dual_net_->RunMany({std::move(features)}).front());
     }
 
    protected:

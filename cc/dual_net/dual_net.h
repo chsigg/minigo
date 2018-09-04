@@ -58,6 +58,12 @@ class DualNet {
   using Policy = std::array<float, kNumMoves>;
 
   struct Result {
+    // This struct should only be moved for performance reasons.
+    Result(const Result&) = delete;
+    Result& operator=(const Result&) = delete;
+    inline Result(Result&&) = default;
+    inline Result& operator=(Result&&) = default;
+
     std::vector<Policy> policies;
     std::vector<float> values;
     std::string model;
@@ -67,7 +73,10 @@ class DualNet {
 
   // Base class to perform inferences on a single batch of features.
   class Client {
+    Client(const Client&) = delete;
+    Client& operator=(const Client&) = delete;
    public:
+    Client();
     virtual ~Client();
 
     // Runs inference on a batch of input features. Thread-safe.
@@ -75,7 +84,11 @@ class DualNet {
   };
 
   class Service {
+    Service(const Service&) = delete;
+    Service& operator=(const Service&) = delete;
    public:
+    Service();
+
     virtual ~Service();
 
     // Creates a new client.
