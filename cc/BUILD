@@ -28,10 +28,7 @@ cc_library(
             "tensorflow/tensorflow/contrib/lite/**",
         ],
     ),
-    includes = [
-        "tensorflow",
-        "tensorflow/external/nsync/public",
-    ],
+    strip_include_prefix = "tensorflow",
 )
 
 cc_library(
@@ -46,8 +43,25 @@ cc_library(
         ],
         exclude = ["**/*.so"],
     ),
-    includes = ["tensorflow"],
     linkopts = ["-ldl"],
+    strip_include_prefix = "tensorflow",
+)
+
+cc_library(
+    name = "tensorrt",
+    srcs = [
+        "tensorrt/lib/libnvinfer.so",
+        "tensorrt/lib/libnvinfer.so.4",
+        "tensorrt/lib/libnvinfer.so.4.1.2",
+        "tensorrt/lib/libnvparsers.so",
+        "tensorrt/lib/libnvparsers.so.4",
+        "tensorrt/lib/libnvparsers.so.4.1.2",
+    ],
+    hdrs = glob(
+        ["tensorrt/include/*.h"],
+    ),
+    include_prefix = "tensorrt",
+    strip_include_prefix = "tensorrt/include",
 )
 
 minigo_cc_library(

@@ -37,9 +37,9 @@ class BatchingService {
   }
 
   // Runs inference on a batch of input features aynchronously.
-  DualNet::Result RunMany(std::vector<DualNet::BoardFeatures>&& features) {
+  DualNet::Result Run(std::vector<DualNet::BoardFeatures>&& features) {
     size_t num_features = features.size();
-    MG_CHECK(num_features >= static_cast<size_t>(FLAGS_batch_size));
+    MG_CHECK(num_features <= static_cast<size_t>(FLAGS_batch_size));
 
     std::promise<DualNet::Result> promise;
     auto future = promise.get_future();
@@ -122,7 +122,7 @@ class BatchingClient : public DualNet::Client {
   ~BatchingClient() override { service_->DecrementClientCount(); }
 
   DualNet::Result Run(std::vector<DualNet::BoardFeatures>&& features) override {
-    return service_->RunMany(std::move(features));
+    return service_->Run(std::move(features));
   }
 
  private:

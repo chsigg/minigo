@@ -27,6 +27,13 @@
 #endif  // MG_DEFAULT_ENGINE
 #endif  // MG_ENABLE_LITE_DUAL_NET
 
+#ifdef MG_ENABLE_TRT_DUAL_NET
+#include "cc/dual_net/trt_dual_net.h"
+#ifndef MG_DEFAULT_ENGINE
+#define MG_DEFAULT_ENGINE "trt"
+#endif  // MG_DEFAULT_ENGINE
+#endif  // MG_ENABLE_TRT_DUAL_NET
+
 DEFINE_string(engine, MG_DEFAULT_ENGINE,
               "The inference engine to use. Accepted values:"
 #ifdef MG_ENABLE_REMOTE_DUAL_NET
@@ -37,6 +44,9 @@ DEFINE_string(engine, MG_DEFAULT_ENGINE,
 #endif
 #ifdef MG_ENABLE_LITE_DUAL_NET
               " \"lite\""
+#endif
+#ifdef MG_ENABLE_TRT_DUAL_NET
+              " \"trt\""
 #endif
 );
 
@@ -66,6 +76,14 @@ std::unique_ptr<DualNet> NewDualNet(const std::string& model_path) {
 #else
     MG_FATAL() << "Binary wasn't compiled with lite inference support";
 #endif  // MG_ENABLE_LITE_DUAL_NET
+  }
+
+  if (FLAGS_engine == "trt") {
+#ifdef MG_ENABLE_TRT_DUAL_NET
+    return NewTrtDualNet(model_path);
+#else
+    MG_FATAL() << "Binary wasn't compiled with TensorRT inference support";
+#endif  // MG_ENABLE_TRT_DUAL_NET
   }
 
   MG_FATAL() << "Unrecognized inference engine \"" << FLAGS_engine << "\"";

@@ -119,6 +119,15 @@ class TfDualNet : public DualNet {
  public:
   explicit TfDualNet(std::string model_path)
       : DualNet(model_path), running_(true) {
+    // If we can't find the specified graph, try adding a .pb extension.
+    auto* env = tensorflow::Env::Default();
+    if (!env->FileExists(model_path).ok()) {
+      model_path = absl::StrCat(model_path, ".pb");
+    }
+
+    tensorflow::GraphDef graph_def;
+    TF_CHECK_OK(tensorflow::ReadBinaryProto(env, model_path, &graph_def));
+
     auto functor = [this](const tensorflow::GraphDef& graph_def) {
       TfWorker worker(graph_def);
       while (running_) {
@@ -132,15 +141,6 @@ class TfDualNet : public DualNet {
         }
       }
     };
-
-    // If we can't find the specified graph, try adding a .pb extension.
-    auto* env = tensorflow::Env::Default();
-    if (!env->FileExists(model_path).ok()) {
-      model_path = absl::StrCat(model_path, ".pb");
-    }
-
-    tensorflow::GraphDef graph_def;
-    TF_CHECK_OK(tensorflow::ReadBinaryProto(env, model_path, &graph_def));
 
     for (int device_id = 0; device_id < FLAGS_num_gpus; ++device_id) {
       auto device = std::to_string(device_id);

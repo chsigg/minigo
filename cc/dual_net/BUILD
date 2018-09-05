@@ -29,6 +29,11 @@ config_setting(
     define_values = {"lite": "1"},
 )
 
+config_setting(
+    name = "enable_trt",
+    define_values = {"trt": "1"},
+)
+
 minigo_cc_library(
     name = "dual_net",
     srcs = ["dual_net.cc"],
@@ -50,6 +55,9 @@ factory_engine_copts = select({
 }) + select({
     ":enable_lite": ["-DMG_ENABLE_LITE_DUAL_NET"],
     "//conditions:default": [],
+}) + select({
+    ":enable_trt": ["-DMG_ENABLE_TRT_DUAL_NET"],
+    "//conditions:default": [],
 })
 
 factory_engine_deps = select({
@@ -61,6 +69,9 @@ factory_engine_deps = select({
 }) + select({
     ":enable_lite": [":lite_dual_net"],
     "//conditions:default": [],
+}) + select({
+    ":enable_trt": [":trt_dual_net"],
+    "//conditions:default": [],
 })
 
 minigo_cc_library(
@@ -70,7 +81,7 @@ minigo_cc_library(
     copts = factory_engine_copts,
     deps = [
         ":dual_net",
-        ":batching_dual_net",
+        ":batching_client",
         "//cc:base",
         "//cc:check",
         "@com_github_gflags_gflags//:gflags",
@@ -137,7 +148,23 @@ minigo_cc_library(
 )
 
 minigo_cc_library(
-    name = "batching_dual_net",
+    name = "trt_dual_net",
+    srcs = ["trt_dual_net.cc"],
+    hdrs = ["trt_dual_net.h"],
+    deps = [
+        ":dual_net",
+        "//cc:base",
+        "//cc:check",
+        "//cc:tensorrt",
+        "//cc:thread_safe_queue",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+        "@local_config_cuda//:cuda",
+    ],
+)
+
+minigo_cc_library(
+    name = "batching_client",
     srcs = ["batching_client.cc"],
     hdrs = ["batching_client.h"],
     deps = [
