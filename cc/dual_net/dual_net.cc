@@ -33,9 +33,9 @@ DualNet::Client::Client() = default;
 
 DualNet::Client::~Client() = default;
 
-DualNet::Service::Service() = default;
+DualNet::ClientFactory::ClientFactory() = default;
 
-DualNet::Service::~Service() = default;
+DualNet::ClientFactory::~ClientFactory() = default;
 
 DualNet::DualNet(const std::string& model_path) : model_path_(model_path) {}
 

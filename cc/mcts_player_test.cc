@@ -45,8 +45,7 @@ class TestClient : public DualNet::Client {
   TestClient(std::unique_ptr<DualNet> dual_net)
       : dual_net_(std::move(dual_net)) {}
 
-  DualNet::Result RunMany(
-      std::vector<DualNet::BoardFeatures>&& features) override {
+  DualNet::Result Run(std::vector<DualNet::BoardFeatures>&& features) override {
     return std::move(dual_net_->RunMany({std::move(features)}).front());
   }
 
@@ -77,7 +76,7 @@ class TestablePlayer : public MctsPlayer {
   }
 
   DualNet::Result Run(const DualNet::BoardFeatures& features) {
-    return client()->RunMany({features});
+    return client()->Run({features});
   }
 
   std::vector<MctsNode*> TreeSearch(int virtual_losses) {

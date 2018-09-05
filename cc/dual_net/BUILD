@@ -138,8 +138,8 @@ minigo_cc_library(
 
 minigo_cc_library(
     name = "batching_dual_net",
-    srcs = ["batching_service.cc"],
-    hdrs = ["batching_service.h"],
+    srcs = ["batching_client.cc"],
+    hdrs = ["batching_client.h"],
     deps = [
         ":dual_net",
         "//cc:base",

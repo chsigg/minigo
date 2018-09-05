@@ -69,27 +69,29 @@ class DualNet {
     std::string model;
   };
 
-  class Service;
+  class ClientFactory;
 
   // Base class to perform inferences on a single batch of features.
   class Client {
     Client(const Client&) = delete;
     Client& operator=(const Client&) = delete;
+
    public:
     Client();
     virtual ~Client();
 
     // Runs inference on a batch of input features. Thread-safe.
-    virtual Result RunMany(std::vector<BoardFeatures>&& features) = 0;
+    virtual Result Run(std::vector<BoardFeatures>&& features) = 0;
   };
 
-  class Service {
-    Service(const Service&) = delete;
-    Service& operator=(const Service&) = delete;
-   public:
-    Service();
+  class ClientFactory {
+    ClientFactory(const ClientFactory&) = delete;
+    ClientFactory& operator=(const ClientFactory&) = delete;
 
-    virtual ~Service();
+   public:
+    ClientFactory();
+
+    virtual ~ClientFactory();
 
     // Creates a new client.
     virtual std::unique_ptr<Client> New() = 0;

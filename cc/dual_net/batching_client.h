@@ -1,5 +1,5 @@
-#ifndef CC_DUAL_NET_BATCHING_SERVICE_H_
-#define CC_DUAL_NET_BATCHING_SERVICE_H_
+#ifndef CC_DUAL_NET_BATCHING_CLIENT_H_
+#define CC_DUAL_NET_BATCHING_CLIENT_H_
 
 #include <queue>
 #include <vector>
@@ -9,9 +9,9 @@
 
 namespace minigo {
 
-std::unique_ptr<DualNet::Service> NewBatchingService(
+std::unique_ptr<DualNet::ClientFactory> NewBatchingClientFactory(
     std::unique_ptr<DualNet> dual_net);
 
 }  // namespace minigo
 
-#endif  // CC_DUAL_NET_BATCHING_SERVICE_H_
+#endif  // CC_DUAL_NET_BATCHING_CLIENT_H_

@@ -364,7 +364,7 @@ void MctsPlayer::ProcessLeaves(const std::vector<MctsNode*>& leaves) {
         symmetries_used_[i], raw_features.data(), features[i].data());
   }
 
-  auto result = client_->RunMany(std::move(features));
+  auto result = client_->Run(std::move(features));
 
   // Record some information about the inference.
   if (!result.model.empty()) {

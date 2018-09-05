@@ -1,4 +1,4 @@
-#include "cc/dual_net/batching_service.h"
+#include "cc/dual_net/batching_client.h"
 
 #include "absl/memory/memory.h"
 #include "absl/synchronization/mutex.h"
@@ -6,24 +6,7 @@
 
 namespace minigo {
 namespace {
-class BatchingService : public DualNet::Service {
-  class BatchingClient : public DualNet::Client {
-   public:
-    BatchingClient(BatchingService* service) : service_(service) {
-      service_->IncrementClientCount();
-    }
-
-    ~BatchingClient() override { service_->DecrementClientCount(); }
-
-    DualNet::Result RunMany(
-        std::vector<DualNet::BoardFeatures>&& features) override {
-      return service_->RunMany(std::move(features));
-    }
-
-   private:
-    BatchingService* service_;
-  };
-
+class BatchingService {
   struct InferenceData {
     std::vector<DualNet::BoardFeatures> features;
     std::promise<DualNet::Result> promise;
@@ -37,16 +20,11 @@ class BatchingService : public DualNet::Service {
         run_counter_(0),
         num_runs_(0) {}
 
-  ~BatchingService() override {
+  ~BatchingService() {
     std::cerr << "Ran " << num_runs_ << " batches with an average size of "
               << static_cast<float>(run_counter_) / num_runs_ << ".\n";
   }
 
-  std::unique_ptr<DualNet::Client> New() override {
-    return absl::make_unique<BatchingClient>(this);
-  }
-
- private:
   void IncrementClientCount() {
     absl::MutexLock lock(&mutex_);
     ++num_clients_;
@@ -76,6 +54,7 @@ class BatchingService : public DualNet::Service {
     return future.get();
   }
 
+ private:
   void MaybeRunBatches() EXCLUSIVE_LOCKS_REQUIRED(queue_mutex) {
     while (size_t batch_size =
                std::min(queue_counter_ - run_counter_,
@@ -133,10 +112,39 @@ class BatchingService : public DualNet::Service {
   // For printing batching stats in the destructor only.
   size_t num_runs_ GUARDED_BY(&mutex_);
 };
+
+class BatchingClient : public DualNet::Client {
+ public:
+  BatchingClient(BatchingService* service) : service_(service) {
+    service_->IncrementClientCount();
+  }
+
+  ~BatchingClient() override { service_->DecrementClientCount(); }
+
+  DualNet::Result Run(std::vector<DualNet::BoardFeatures>&& features) override {
+    return service_->RunMany(std::move(features));
+  }
+
+ private:
+  BatchingService* service_;
+};
+
+class BatchingClientFactory : public DualNet::ClientFactory {
+ public:
+  explicit BatchingClientFactory(std::unique_ptr<DualNet> dual_net)
+      : service_(std::move(dual_net)) {}
+
+  std::unique_ptr<DualNet::Client> New() override {
+    return absl::make_unique<BatchingClient>(&service_);
+  }
+
+ private:
+  BatchingService service_;
+};
 }  // namespace
 
-std::unique_ptr<DualNet::Service> NewBatchingService(
+std::unique_ptr<DualNet::ClientFactory> NewBatchingClientFactory(
     std::unique_ptr<DualNet> dual_net) {
-  return absl::make_unique<BatchingService>(std::move(dual_net));
+  return absl::make_unique<BatchingClientFactory>(std::move(dual_net));
 }
 }  // namespace minigo

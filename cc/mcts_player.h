@@ -193,7 +193,7 @@ class MctsPlayer {
           first_move(first_move),
           last_move(first_move) {}
 
-    // Model name returned from RunMany.
+    // Model name returned from Run.
     std::string model;
 
     // Total number of times a model was used for inference.
