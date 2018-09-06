@@ -367,6 +367,7 @@ minigo_cc_binary(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
     ],
+    visibility = ["//visibility:public"],
 )
 
 minigo_cc_binary(

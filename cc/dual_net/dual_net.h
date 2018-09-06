@@ -93,8 +93,9 @@ class DualNet {
 
     virtual ~ClientFactory();
 
-    // Creates a new client.
-    virtual std::unique_ptr<Client> New() = 0;
+    // Creates a new client. There needs to be exactly one non-weak client per
+    // MctsPlayer when calling SuggestMove().
+    virtual std::unique_ptr<Client> New(bool weak = false) = 0;
   };
 
   explicit DualNet(const std::string& model_path);

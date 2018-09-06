@@ -55,7 +55,7 @@ class BatchingService {
   }
 
  private:
-  void MaybeRunBatches() EXCLUSIVE_LOCKS_REQUIRED(queue_mutex) {
+  void MaybeRunBatches() EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
     while (size_t batch_size =
                std::min(queue_counter_ - run_counter_,
                         static_cast<size_t>(FLAGS_batch_size))) {
@@ -113,20 +113,26 @@ class BatchingService {
   size_t num_runs_ GUARDED_BY(&mutex_);
 };
 
-class BatchingClient : public DualNet::Client {
+class WeakBatchingClient : public DualNet::Client {
  public:
-  BatchingClient(BatchingService* service) : service_(service) {
-    service_->IncrementClientCount();
-  }
-
-  ~BatchingClient() override { service_->DecrementClientCount(); }
+  WeakBatchingClient(BatchingService* service) : service_(service) {}
 
   DualNet::Result Run(std::vector<DualNet::BoardFeatures>&& features) override {
     return service_->Run(std::move(features));
   }
 
- private:
+ protected:
   BatchingService* service_;
+};
+
+class CountedBatchingClient : public WeakBatchingClient {
+ public:
+  CountedBatchingClient(BatchingService* service)
+      : WeakBatchingClient(service) {
+    service_->IncrementClientCount();
+  }
+
+  ~CountedBatchingClient() override { service_->DecrementClientCount(); }
 };
 
 class BatchingClientFactory : public DualNet::ClientFactory {
@@ -134,8 +140,11 @@ class BatchingClientFactory : public DualNet::ClientFactory {
   explicit BatchingClientFactory(std::unique_ptr<DualNet> dual_net)
       : service_(std::move(dual_net)) {}
 
-  std::unique_ptr<DualNet::Client> New() override {
-    return absl::make_unique<BatchingClient>(&service_);
+  std::unique_ptr<DualNet::Client> New(bool weak) override {
+    if (weak) {
+      return absl::make_unique<WeakBatchingClient>(&service_);
+    }
+    return absl::make_unique<CountedBatchingClient>(&service_);
   }
 
  private:

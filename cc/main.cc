@@ -242,8 +242,8 @@ class SelfPlayer {
  public:
   void Run() {
     auto start_time = absl::Now();
-    service_ = NewDualNetClientFactory(FLAGS_model);
-    std::cerr << "DualNet service created from " << FLAGS_model << " in "
+    factory_ = NewDualNetClientFactory(FLAGS_model);
+    std::cerr << "DualNet factory created from " << FLAGS_model << " in "
               << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
               << std::endl;
 
@@ -267,7 +267,7 @@ class SelfPlayer {
   struct GameOptions {
     void Init(int thread_id, Random* rnd) {
       ParseMctsPlayerOptionsFromFlags(&player_options);
-      player_options.verbose = thread_id == 0;
+      player_options.verbose = false;  // thread_id == 0;
       // If an random seed was explicitly specified, make sure we use a
       // different seed for each thread.
       if (player_options.random_seed != 0) {
@@ -355,7 +355,7 @@ class SelfPlayer {
                "Use --checkpoint_dir and --engine=remote to perform inference "
                "using the most recent checkpoint from training.";
         game_options.Init(thread_id, &rnd_);
-        player = absl::make_unique<MctsPlayer>(service_->New(),
+        player = absl::make_unique<MctsPlayer>(factory_->New(),
                                                game_options.player_options);
       }
 
@@ -374,7 +374,7 @@ class SelfPlayer {
         player->PlayMove(move);
       }
 
-      {
+      if (player->options().verbose) {
         // Log the end game info with the shared mutex held to prevent the
         // outputs from multiple threads being interleaved.
         absl::MutexLock lock(&mutex_);
@@ -383,7 +383,7 @@ class SelfPlayer {
 
       // Write the outputs.
       auto now = absl::Now();
-      auto output_name = GetOutputBaseName(now) + std::to_string(thread_id);
+      auto output_name = absl::StrCat(GetOutputBaseName(now), thread_id);
       auto sub_dir = GetOutputSubDir(now);
 
       bool is_holdout;
@@ -406,7 +406,7 @@ class SelfPlayer {
       }
     } while (game_options.run_forever);
 
-    std::cerr << "Thread " << thread_id << " stopping" << std::endl;
+    // std::cerr << "Thread " << thread_id << " stopping" << std::endl;
   }
 
   void MaybeReloadFlags() EXCLUSIVE_LOCKS_REQUIRED(&mutex_) {
@@ -449,7 +449,7 @@ class SelfPlayer {
     }
   }
 
-  std::unique_ptr<DualNet::ClientFactory> service_;
+  std::unique_ptr<DualNet::ClientFactory> factory_;
 
   absl::Mutex mutex_;
   Random rnd_ GUARDED_BY(&mutex_);
@@ -457,10 +457,162 @@ class SelfPlayer {
   uint64_t flags_timestamp_ = 0;
 };
 
-void SelfPlay() {
-  SelfPlayer player;
-  player.Run();
-}
+class EvenEvaluator {
+  class Barrier {
+   public:
+    explicit Barrier(size_t count)
+        : count_(count), num_waiting_(0), generation_(0) {}
+
+    void Wait() {
+      absl::MutexLock lock(&mutex_);
+      if (++num_waiting_ == count_) {
+        IncrementGeneration();
+      } else {
+        auto generation = generation_;
+        while (generation != generation_) {
+          cond_var_.Wait(&mutex_);
+        }
+      }
+    }
+
+    void DecrementCount() {
+      absl::MutexLock lock(&mutex_);
+      if (num_waiting_ == --count_) {
+        IncrementGeneration();
+      }
+    }
+
+   private:
+    void IncrementGeneration() EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+      ++generation_;
+      num_waiting_ = 0;
+      cond_var_.SignalAll();
+    }
+
+    absl::Mutex mutex_;
+    absl::CondVar cond_var_;
+    size_t count_ GUARDED_BY(&mutex_);
+    size_t num_waiting_ GUARDED_BY(&mutex_);
+    size_t generation_ GUARDED_BY(&mutex_);
+  };
+
+ public:
+  void Run() {
+    auto start_time = absl::Now();
+    cur_factory_ = NewDualNetClientFactory(FLAGS_model);
+    prev_factory_ = NewDualNetClientFactory(FLAGS_model_two);
+    std::cerr << "DualNet factories created from " << FLAGS_model << "\n  and "
+              << FLAGS_model_two << " in "
+              << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
+              << std::endl;
+
+    ParseMctsPlayerOptionsFromFlags(&options_);
+    options_.inject_noise = false;
+    options_.soft_pick = false;
+    options_.random_symmetry = true;
+
+    int num_games = FLAGS_parallel_games;
+    barrier_ = absl::make_unique<Barrier>(2 * num_games);
+    results_ = 0;
+
+    for (int i = 0; i < num_games; ++i) {
+      threads_.emplace_back(std::bind(&EvenEvaluator::ThreadRun, this, i));
+      threads_.emplace_back(
+          std::bind(&EvenEvaluator::ThreadRun, this, i + num_games));
+    }
+
+    for (auto& t : threads_) {
+      t.join();
+    }
+
+    std::cerr << "Evaluated 2 * " << num_games << " games, total time "
+              << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
+              << std::endl;
+
+    float win_ratio = 0.5f + results_ / (4.0f * num_games);
+    std::cerr << FLAGS_model << " won " << win_ratio * 100 << "% of them."
+              << std::endl;
+  }
+
+ private:
+  void ThreadRun(int thread_id) {
+    auto options = options_;
+    if (options.random_seed != 0) {
+      options.random_seed += 1299283 * thread_id;
+    }
+
+    options.name = FLAGS_model;
+    options.verbose = false;  // thread_id == 0;
+    auto black = absl::make_unique<MctsPlayer>(cur_factory_->New(/*weak=*/true),
+                                               options);
+
+    options.name = FLAGS_model_two;
+    options.verbose = false;
+    auto white = absl::make_unique<MctsPlayer>(
+        prev_factory_->New(/*weak=*/true), options);
+
+    auto* factory = cur_factory_.get();
+    auto* other_factory = prev_factory_.get();
+    if (thread_id >= FLAGS_parallel_games) {
+      // Swap black and white so that previous model opens the game.
+      std::swap(black, white);
+      std::swap(factory, other_factory);
+      barrier_->Wait();  // Wait for current model players to open their games.
+    }
+
+    auto* player = black.get();
+    auto* other_player = white.get();
+    while (!player->game_over()) {
+      auto client = factory->New();
+      barrier_->Wait();  // Wait for all threads to create client.
+      auto move = player->SuggestMove();
+      if (player->options().verbose) {
+        std::cerr << player->root()->Describe() << "\n";
+      }
+      player->PlayMove(move);
+      other_player->PlayMove(move);
+      if (player->options().verbose) {
+        std::cerr << player->root()->position.ToPrettyString();
+      }
+      std::swap(player, other_player);
+      std::swap(factory, other_factory);
+    }
+    barrier_->DecrementCount();
+
+    int result = static_cast<int>(player->result());
+    results_ += thread_id < FLAGS_parallel_games ? result : -result;
+
+    if (black->options().verbose) {
+      std::cerr << "Black (" << black->name()
+                << ") result: " << black->result_string() << "\n";
+      ;
+    }
+
+    // Write SGF.
+    if (!FLAGS_sgf_dir.empty()) {
+      std::string output_name =
+          absl::StrCat(GetOutputBaseName(absl::Now()), thread_id, "-",
+                       black->name(), "-", white->name());
+      WriteSgf(FLAGS_sgf_dir, output_name, *black, *white, true);
+    }
+
+    // std::cerr << "Thread " << thread_id << " stopping" << std::endl;
+  }
+
+  std::unique_ptr<DualNet::ClientFactory> cur_factory_;
+  std::unique_ptr<DualNet::ClientFactory> prev_factory_;
+
+  MctsPlayer::Options options_;
+
+  std::unique_ptr<Barrier> barrier_;
+
+  std::vector<std::thread> threads_;
+  std::atomic<int> results_;
+};
+
+void SelfPlay() { SelfPlayer().Run(); }
+
+void EvalEven() { EvenEvaluator().Run(); }
 
 void Eval() {
   MctsPlayer::Options options;
@@ -470,12 +622,12 @@ void Eval() {
   options.random_symmetry = true;
 
   options.name = static_cast<std::string>(file::Stem(FLAGS_model));
-  auto black_service = NewDualNetClientFactory(FLAGS_model);
-  auto black = absl::make_unique<MctsPlayer>(black_service->New(), options);
+  auto black_factory = NewDualNetClientFactory(FLAGS_model);
+  auto black = absl::make_unique<MctsPlayer>(black_factory->New(), options);
 
   options.name = static_cast<std::string>(file::Stem(FLAGS_model_two));
-  auto white_service = NewDualNetClientFactory(FLAGS_model_two);
-  auto white = absl::make_unique<MctsPlayer>(white_service->New(), options);
+  auto white_factory = NewDualNetClientFactory(FLAGS_model_two);
+  auto white = absl::make_unique<MctsPlayer>(white_factory->New(), options);
 
   auto* player = black.get();
   auto* other_player = white.get();
@@ -520,6 +672,8 @@ int main(int argc, char* argv[]) {
 
   if (FLAGS_mode == "selfplay") {
     minigo::SelfPlay();
+  } else if (FLAGS_mode == "eval_even") {
+    minigo::EvalEven();
   } else if (FLAGS_mode == "eval") {
     minigo::Eval();
   } else if (FLAGS_mode == "gtp") {
