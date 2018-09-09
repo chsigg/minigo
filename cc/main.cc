@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <dirent.h>
 #include <stdio.h>
+#include <sys/types.h>
 #include <unistd.h>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <memory>
+#include <streambuf>
 #include <string>
 #include <thread>
 #include <utility>
@@ -614,6 +618,76 @@ void SelfPlay() { SelfPlayer().Run(); }
 
 void EvalEven() { EvenEvaluator().Run(); }
 
+inline bool EndsWith(const std::string& value, const std::string& ending) {
+  if (ending.size() > value.size()) return false;
+  return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
+}
+
+void Puzzle() {
+  auto start_time = absl::Now();
+  auto factory = NewDualNetClientFactory(FLAGS_model);
+  std::cerr << "DualNet factory created from " << FLAGS_model << " in "
+            << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
+            << std::endl;
+
+  MctsPlayer::Options options;
+  ParseMctsPlayerOptionsFromFlags(&options);
+  options.verbose = false;
+
+  std::vector<std::string> sgf_files;
+  DIR* dirp = opendir(FLAGS_sgf_dir.c_str());
+  while (dirent* dp = readdir(dirp)) {
+    std::string filename(dp->d_name);
+    if (EndsWith(filename, ".sgf")) {
+      sgf_files.push_back(filename);
+    }
+  }
+  closedir(dirp);
+
+  using Pair = std::pair<std::unique_ptr<MctsPlayer>, Move>;
+  std::vector<Pair> puzzles;
+  for (const auto& sgf_file : sgf_files) {
+    std::ifstream ifs(file::JoinPath(FLAGS_sgf_dir, sgf_file));
+    MG_CHECK(ifs);
+    sgf::Ast ast;
+    using Iter = std::istreambuf_iterator<char>;
+    MG_CHECK(ast.Parse(std::string(Iter(ifs), Iter())));
+    auto moves = GetMainLineMoves(ast);
+    std::vector<std::unique_ptr<MctsPlayer>> players(moves.size());
+    for (auto& player : players) {
+      player.reset(new MctsPlayer(factory->New(), options));
+    }
+    for (const auto& move : moves) {
+      puzzles.emplace_back(std::move(players.back()), move);
+      players.pop_back();
+      for (auto& player : players) {
+        player->PlayMove(move.c);
+      }
+    }
+  }
+
+  std::atomic<size_t> result(0);
+  std::vector<std::thread> threads;
+  for (auto& puzzle : puzzles) {
+    threads.emplace_back(std::bind(
+        [&](const Pair& pair) {
+          if (pair.first->SuggestMove() == pair.second.c) {
+            ++result;
+          }
+        },
+        std::move(puzzle)));
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+  std::cerr << "All threads stopped, total time "
+            << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
+            << std::endl;
+
+  std::cerr << "Solved " << result << " of " << puzzles.size() << " puzzles ("
+            << result * 100.0f / puzzles.size() << "%)." << std::endl;
+}
+
 void Eval() {
   MctsPlayer::Options options;
   ParseMctsPlayerOptionsFromFlags(&options);
@@ -674,6 +748,8 @@ int main(int argc, char* argv[]) {
     minigo::SelfPlay();
   } else if (FLAGS_mode == "eval_even") {
     minigo::EvalEven();
+  } else if (FLAGS_mode == "puzzle") {
+    minigo::Puzzle();
   } else if (FLAGS_mode == "eval") {
     minigo::Eval();
   } else if (FLAGS_mode == "gtp") {
