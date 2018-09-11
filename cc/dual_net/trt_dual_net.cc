@@ -158,7 +158,8 @@ class TrtDualNet : public DualNet {
     builder->setMaxBatchSize(FLAGS_batch_size);
     builder->setMaxWorkspaceSize(1ull << 30);  // One gigabyte.
 
-    cudaSetDevice(0);
+    auto gpu_ids = GetGpuIds();
+    cudaSetDevice(gpu_ids.front());
     auto* engine = [&] {
       // Building TensorRT engines is not thread-safe.
       static std::mutex mutex;
@@ -178,13 +179,13 @@ class TrtDualNet : public DualNet {
     auto* blob = engine->serialize();
     MG_CHECK(blob);
 
-    for (int device_id = 1; device_id < FLAGS_num_gpus; ++device_id) {
-      futures.emplace_back(std::async(std::launch::async, [&, device_id]() {
+    for (size_t i = 1; i < gpu_ids.size(); ++i) {
+      futures.emplace_back(std::async(std::launch::async, [&](int device_id) {
         cudaSetDevice(device_id);
         return std::make_pair(
             device_id, runtime_->deserializeCudaEngine(blob->data(),
                                                        blob->size(), nullptr));
-      }));
+      }, gpu_ids[i]));
     }
 
     auto functor = [this](const std::pair<int, nvinfer1::ICudaEngine*>& pair) {

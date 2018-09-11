@@ -167,8 +167,19 @@ Coord MctsPlayer::SuggestMove() {
 }
 
 Coord MctsPlayer::PickMove() {
+  auto is_legal = [&](const Coord& c) {
+    bool legal = !root_->position.IsMoveLegal(c);
+    if (!legal && options_.verbose) {
+      std::cerr << "Picked illegal move " << c << ", passing." << std::endl;
+    }
+    return legal;
+  };
+
   if (root_->position.n() >= temperature_cutoff_) {
     Coord c = root_->GetMostVisitedMove();
+    if (!is_legal(c)) {
+      return Coord::kPass;
+    }
     if (options_.verbose) {
       std::cerr << "Picked arg_max " << c << std::endl;
     }
@@ -190,6 +201,9 @@ Coord MctsPlayer::PickMove() {
   }
   float e = rnd_();
   Coord c = SearchSorted(cdf, e * cdf.back());
+  if (!is_legal(c)) {
+    return Coord::kPass;
+  }
   if (options_.verbose) {
     std::cerr << "Picked rnd(" << e << ") " << c << std::endl;
   }

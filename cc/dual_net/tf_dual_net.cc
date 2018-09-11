@@ -142,7 +142,7 @@ class TfDualNet : public DualNet {
       }
     };
 
-    for (int device_id = 0; device_id < FLAGS_num_gpus; ++device_id) {
+    for (auto device_id : GetGpuIds()) {
       auto device = std::to_string(device_id);
       PlaceOnDevice(&graph_def, "/gpu:" + device);
       // Two threads per device.

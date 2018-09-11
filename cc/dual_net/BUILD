@@ -43,6 +43,7 @@ minigo_cc_library(
         "//cc:position",
         "@com_github_gflags_gflags//:gflags",
         "@com_google_absl//absl/types:span",
+        "@local_config_cuda//:cuda",
     ],
 )
 
@@ -172,8 +173,8 @@ minigo_cc_library(
         "//cc:base",
         "//cc:check",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:span",
         "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:span",
     ],
 )
 

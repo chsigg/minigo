@@ -26,7 +26,6 @@
 #include "gflags/gflags.h"
 
 DECLARE_int32(batch_size);
-DECLARE_int32(num_gpus);
 
 namespace minigo {
 
@@ -120,6 +119,8 @@ class DualNet {
  protected:
   std::string model_path_;
 };
+
+std::vector<int> GetGpuIds();
 
 }  // namespace minigo
 

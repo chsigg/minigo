@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <streambuf>
@@ -125,7 +126,7 @@ DEFINE_string(sgf_dir, "", "SGF directory. If empty, no SGF is written.");
 DEFINE_double(holdout_pct, 0.03,
               "Fraction of games to hold out for validation.");
 
-DEFINE_string(sub_dir_format, "%Y-%m-%d-%H",
+DEFINE_string(subdir_format, "%Y-%m-%d-%H",
               "Time format of output subdirectory");
 
 // Self play flags:
@@ -152,7 +153,7 @@ std::string GetOutputBaseName(absl::Time now) {
 }
 
 std::string GetOutputSubDir(absl::Time now) {
-  return absl::FormatTime(FLAGS_sub_dir_format, now, absl::UTCTimeZone());
+  return absl::FormatTime(FLAGS_subdir_format, now, absl::UTCTimeZone());
 }
 
 void WriteExample(const std::string& output_dir, const std::string& output_name,
@@ -503,8 +504,8 @@ class EvenEvaluator {
  public:
   void Run() {
     auto start_time = absl::Now();
-    cur_factory_ = NewDualNetClientFactory(FLAGS_model);
-    prev_factory_ = NewDualNetClientFactory(FLAGS_model_two);
+    prev_factory_ = NewDualNetClientFactory(FLAGS_model);
+    cur_factory_ = NewDualNetClientFactory(FLAGS_model_two);
     std::cerr << "DualNet factories created from " << FLAGS_model << "\n  and "
               << FLAGS_model_two << " in "
               << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
@@ -534,8 +535,8 @@ class EvenEvaluator {
               << std::endl;
 
     float win_ratio = 0.5f + results_ / (4.0f * num_games);
-    std::cerr << FLAGS_model << " won " << win_ratio * 100 << "% of them."
-              << std::endl;
+    std::cout << FLAGS_model << " won " << std::fixed << std::setprecision(1)
+              << win_ratio * 100 << "% of them." << std::endl;
   }
 
  private:
@@ -545,23 +546,23 @@ class EvenEvaluator {
       options.random_seed += 1299283 * thread_id;
     }
 
-    options.name = FLAGS_model;
+    options.name = static_cast<std::string>(file::Stem(FLAGS_model));
     options.verbose = false;  // thread_id == 0;
-    auto black = absl::make_unique<MctsPlayer>(cur_factory_->New(/*weak=*/true),
-                                               options);
-
-    options.name = FLAGS_model_two;
-    options.verbose = false;
-    auto white = absl::make_unique<MctsPlayer>(
+    auto black = absl::make_unique<MctsPlayer>(
         prev_factory_->New(/*weak=*/true), options);
 
-    auto* factory = cur_factory_.get();
-    auto* other_factory = prev_factory_.get();
+    options.name = static_cast<std::string>(file::Stem(FLAGS_model_two));
+    options.verbose = false;
+    auto white = absl::make_unique<MctsPlayer>(cur_factory_->New(/*weak=*/true),
+                                               options);
+
+    auto* factory = prev_factory_.get();
+    auto* other_factory = cur_factory_.get();
     if (thread_id >= FLAGS_parallel_games) {
-      // Swap black and white so that previous model opens the game.
+      // Swap black and white so that current model opens the game.
       std::swap(black, white);
       std::swap(factory, other_factory);
-      barrier_->Wait();  // Wait for current model players to open their games.
+      barrier_->Wait();  // Wait for previous model players to open their games.
     }
 
     auto* player = black.get();
@@ -583,8 +584,8 @@ class EvenEvaluator {
     }
     barrier_->DecrementCount();
 
-    int result = static_cast<int>(player->result());
-    results_ += thread_id < FLAGS_parallel_games ? result : -result;
+    int result = static_cast<int>(std::lround(player->result()));
+    results_ += thread_id < FLAGS_parallel_games ? -result : result;
 
     if (black->options().verbose) {
       std::cerr << "Black (" << black->name()
@@ -603,8 +604,8 @@ class EvenEvaluator {
     // std::cerr << "Thread " << thread_id << " stopping" << std::endl;
   }
 
-  std::unique_ptr<DualNet::ClientFactory> cur_factory_;
   std::unique_ptr<DualNet::ClientFactory> prev_factory_;
+  std::unique_ptr<DualNet::ClientFactory> cur_factory_;
 
   MctsPlayer::Options options_;
 
@@ -684,7 +685,8 @@ void Puzzle() {
             << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
             << std::endl;
 
-  std::cerr << "Solved " << result << " of " << puzzles.size() << " puzzles ("
+  std::cout << "Solved " << result << " of " << puzzles.size() << " puzzles ("
+            << std::fixed << std::setprecision(1)
             << result * 100.0f / puzzles.size() << "%)." << std::endl;
 }
 

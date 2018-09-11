@@ -19,10 +19,11 @@
 #include "absl/memory/memory.h"
 #include "cc/color.h"
 #include "cc/constants.h"
+#include "cuda/cuda_runtime_api.h"
 
 // TODO(csigg): Expand explanation.
 DEFINE_int32(batch_size, 256, "Inference batch size.");
-DEFINE_int32(num_gpus, 1, "Number of GPUs to use.");
+DEFINE_int32(num_gpus, 0, "Number of GPUs to use.");
 
 namespace minigo {
 
@@ -81,6 +82,18 @@ void DualNet::SetFeatures(absl::Span<const Position::Stones* const> history,
     dst[0] = to_play_feature;
     dst += kNumStoneFeatures;
   }
+}
+
+std::vector<int> GetGpuIds() {
+  int num_gpus = FLAGS_num_gpus;
+  if (num_gpus == 0) {
+    MG_CHECK(cudaGetDeviceCount(&num_gpus) == cudaSuccess);
+  }
+  std::vector<int> result;
+  for (int i = 0; i < num_gpus; ++i) {
+    result.push_back(i);
+  }
+  return result;
 }
 
 }  // namespace minigo
