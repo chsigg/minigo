@@ -586,10 +586,8 @@ class EvenEvaluator {
     barrier_->DecrementCount();
 
     MG_CHECK(player->result() == other_player->result());
-    // TODO(csigg): this looks to me like the sign is reversed. Only this way
-    // though the win percentage for model two is >50% in average.
     int result = player->result();
-    results_ += thread_id < FLAGS_parallel_games ? result : -result;
+    results_ += thread_id < FLAGS_parallel_games ? -result : result;
 
     if (black->options().verbose) {
       std::cerr << "Black (" << black->name()
