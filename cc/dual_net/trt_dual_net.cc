@@ -180,12 +180,15 @@ class TrtDualNet : public DualNet {
     MG_CHECK(blob);
 
     for (size_t i = 1; i < gpu_ids.size(); ++i) {
-      futures.emplace_back(std::async(std::launch::async, [&](int device_id) {
-        cudaSetDevice(device_id);
-        return std::make_pair(
-            device_id, runtime_->deserializeCudaEngine(blob->data(),
-                                                       blob->size(), nullptr));
-      }, gpu_ids[i]));
+      futures.emplace_back(
+          std::async(std::launch::async,
+                     [&](int device_id) {
+                       cudaSetDevice(device_id);
+                       return std::make_pair(
+                           device_id, runtime_->deserializeCudaEngine(
+                                          blob->data(), blob->size(), nullptr));
+                     },
+                     gpu_ids[i]));
     }
 
     auto functor = [this](const std::pair<int, nvinfer1::ICudaEngine*>& pair) {

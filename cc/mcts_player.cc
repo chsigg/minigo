@@ -168,7 +168,7 @@ Coord MctsPlayer::SuggestMove() {
 
 Coord MctsPlayer::PickMove() {
   auto is_legal = [&](const Coord& c) {
-    bool legal = !root_->position.IsMoveLegal(c);
+    bool legal = root_->position.IsMoveLegal(c);
     if (!legal && options_.verbose) {
       std::cerr << "Picked illegal move " << c << ", passing." << std::endl;
     }

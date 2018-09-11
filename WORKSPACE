@@ -35,12 +35,6 @@ http_archive(
     urls = ["https://github.com/pubref/rules_protobuf/archive/v0.8.2.zip"],
 )
 
-new_local_repository(
-    name = "com_nvidia_tensorrt",
-    build_file = "BUILD.tensorrt",
-    path = "/usr",
-)
-
 load("@org_pubref_rules_protobuf//cpp:rules.bzl", "cpp_proto_repositories")
 load("@org_pubref_rules_protobuf//python:rules.bzl", "py_proto_repositories")
 load("//cc:cuda_configure.bzl", "cuda_configure")

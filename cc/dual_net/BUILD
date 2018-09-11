@@ -159,8 +159,8 @@ minigo_cc_library(
         "//cc:thread_safe_queue",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
-        "@com_nvidia_tensorrt//:tensorrt",
         "@local_config_cuda//:cuda",
+        "@local_config_cuda//:tensorrt",
     ],
 )
 

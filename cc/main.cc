@@ -535,8 +535,9 @@ class EvenEvaluator {
               << std::endl;
 
     float win_ratio = 0.5f + results_ / (4.0f * num_games);
-    std::cout << FLAGS_model << " won " << std::fixed << std::setprecision(1)
-              << win_ratio * 100 << "% of them." << std::endl;
+    std::cout << FLAGS_model_two << " won " << std::fixed
+              << std::setprecision(1) << win_ratio * 100 << "% of them."
+              << std::endl;
   }
 
  private:
@@ -584,8 +585,11 @@ class EvenEvaluator {
     }
     barrier_->DecrementCount();
 
+    MG_CHECK(player->result() == other_player->result());
+    // TODO(csigg): this looks to me like the sign is reversed. Only this way
+    // though the win percentage for model two is >50% in average.
     int result = player->result();
-    results_ += thread_id < FLAGS_parallel_games ? -result : result;
+    results_ += thread_id < FLAGS_parallel_games ? result : -result;
 
     if (black->options().verbose) {
       std::cerr << "Black (" << black->name()
