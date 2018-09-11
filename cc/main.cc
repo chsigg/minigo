@@ -584,7 +584,7 @@ class EvenEvaluator {
     }
     barrier_->DecrementCount();
 
-    int result = static_cast<int>(std::lround(player->result()));
+    int result = player->result();
     results_ += thread_id < FLAGS_parallel_games ? -result : result;
 
     if (black->options().verbose) {

@@ -118,11 +118,11 @@ class MctsPlayer {
   bool game_over() const { return game_over_; }
 
   // Returns the result of the game:
-  //   +1.0 if black won.
-  //    0.0 if the game was drawn.
-  //   -1.0 if white won.
+  //   +1 if black won.
+  //    0 if the game was drawn.
+  //   -1 if white won.
   // Check fails if the game is not yet over.
-  float result() const {
+  int result() const {
     MG_CHECK(game_over_);
     return result_;
   }
@@ -180,7 +180,7 @@ class MctsPlayer {
 
   Options options_;
 
-  float result_ = 0;
+  int result_ = 0;
   std::string result_string_;
   bool game_over_ = false;
 

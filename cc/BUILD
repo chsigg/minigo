@@ -47,23 +47,6 @@ cc_library(
     strip_include_prefix = "tensorflow",
 )
 
-cc_library(
-    name = "tensorrt",
-    srcs = [
-        "tensorrt/lib/libnvinfer.so",
-        "tensorrt/lib/libnvinfer.so.4",
-        "tensorrt/lib/libnvinfer.so.4.1.2",
-        "tensorrt/lib/libnvparsers.so",
-        "tensorrt/lib/libnvparsers.so.4",
-        "tensorrt/lib/libnvparsers.so.4.1.2",
-    ],
-    hdrs = glob(
-        ["tensorrt/include/*.h"],
-    ),
-    include_prefix = "tensorrt",
-    strip_include_prefix = "tensorrt/include",
-)
-
 minigo_cc_library(
     name = "base",
     srcs = [
@@ -349,6 +332,7 @@ minigo_cc_test(
 minigo_cc_binary(
     name = "main",
     srcs = ["main.cc"],
+    visibility = ["//visibility:public"],
     deps = [
         ":base",
         ":check",
@@ -367,7 +351,6 @@ minigo_cc_binary(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
     ],
-    visibility = ["//visibility:public"],
 )
 
 minigo_cc_binary(

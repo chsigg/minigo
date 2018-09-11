@@ -156,10 +156,10 @@ minigo_cc_library(
         ":dual_net",
         "//cc:base",
         "//cc:check",
-        "//cc:tensorrt",
         "//cc:thread_safe_queue",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
+        "@com_nvidia_tensorrt//:tensorrt",
         "@local_config_cuda//:cuda",
     ],
 )

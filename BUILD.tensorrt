@@ -1,0 +1,13 @@
+cc_library(
+    name = "tensorrt",
+    srcs = glob([
+          "lib/x86_64-linux-gnu/libnvinfer.so*",
+          "lib/x86_64-linux-gnu/libnvparsers.so*",
+        ]),
+    hdrs = glob(
+        ["include/x86_64-linux-gnu/Nv*.h"],
+    ),
+    include_prefix = "tensorrt",
+    strip_include_prefix = "include/x86_64-linux-gnu",
+    visibility = ["//visibility:public"],
+)
