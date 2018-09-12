@@ -24,7 +24,7 @@ FakeDualNet::FakeDualNet(float value)
     : FakeDualNet(std::vector<float>(kNumMoves, 1.0f / kNumMoves), value) {}
 
 FakeDualNet::FakeDualNet(std::vector<float> priors, float value)
-    : DualNet("FakeDualNet"), priors_(std::move(priors)), value_(value) {}
+    : priors_(std::move(priors)), value_(value) {}
 
 std::vector<DualNet::Result> FakeDualNet::RunMany(
     std::vector<std::vector<BoardFeatures>>&& feature_vecs) {
@@ -38,8 +38,9 @@ std::vector<DualNet::Result> FakeDualNet::RunMany(
     }
     std::vector<float> values(num_features, value_);
 
-    results.push_back({std::move(policies), std::move(values), model_path_});
+    results.push_back({std::move(policies), std::move(values), "FakeDualNet"});
   }
   return results;
 }
+
 }  // namespace minigo

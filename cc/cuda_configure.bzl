@@ -30,9 +30,11 @@ cc_library(
     include_prefix = "cuda",
     srcs = [
          "cuda/lib64/stubs/libcuda.so",
-         "cuda/lib64/libcudart_static.a",
+         "cuda/lib64/libcudart.so",
     ],
-    linkopts = ["-ldl", "-lrt"],
+    linkopts = ["-ldl", "-lrt", "-lpthread"],
+    alwayslink = True,
+    linkstatic = True,
 )
 
 cc_library(
@@ -49,5 +51,5 @@ cc_library(
 
 cuda_configure = repository_rule(
     implementation = _impl,
-    environ = ["CUDA_PATH", "CUDNN_PATH"],
+    environ = ["CUDA_PATH"],
 )

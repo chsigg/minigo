@@ -131,7 +131,7 @@ class TrtDualNet : public DualNet {
 
  public:
   explicit TrtDualNet(std::string model_path)
-      : DualNet(model_path), running_(true) {
+      : model_path_(model_path), running_(true) {
     runtime_ = nvinfer1::createInferRuntime(logger_);
     MG_CHECK(runtime_);
 
@@ -237,6 +237,8 @@ class TrtDualNet : public DualNet {
   }
 
  private:
+  std::string model_path_;
+
   TrtLogger logger_;
   nvinfer1::IRuntime* runtime_;
   std::vector<nvinfer1::ICudaEngine*> engines_;

@@ -22,7 +22,7 @@
 #include "cuda/cuda_runtime_api.h"
 
 // TODO(csigg): Expand explanation.
-DEFINE_int32(batch_size, 256, "Inference batch size.");
+DEFINE_int32(batch_size, 1024, "Inference batch size.");
 DEFINE_int32(num_gpus, 0, "Number of GPUs to use.");
 
 namespace minigo {
@@ -30,15 +30,9 @@ namespace minigo {
 constexpr int DualNet::kNumStoneFeatures;
 constexpr int DualNet::kNumBoardFeatures;
 
-DualNet::Client::Client() = default;
+DualNet::Factory::Factory() = default;
 
-DualNet::Client::~Client() = default;
-
-DualNet::ClientFactory::ClientFactory() = default;
-
-DualNet::ClientFactory::~ClientFactory() = default;
-
-DualNet::DualNet(const std::string& model_path) : model_path_(model_path) {}
+DualNet::Factory::~Factory() = default;
 
 DualNet::~DualNet() = default;
 

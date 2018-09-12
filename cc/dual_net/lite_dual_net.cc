@@ -38,7 +38,8 @@ namespace minigo {
 namespace {
 class LiteDualNet : public DualNet {
  public:
-  explicit LiteDualNet(const std::string& model_path) : DualNet(model_path) {
+  explicit LiteDualNet(const std::string& model_path)
+      : model_path_(model_path) {
     model_ = FlatBufferModel::BuildFromFile(model_path.c_str());
     MG_CHECK(model_ != nullptr);
 
@@ -122,6 +123,8 @@ class LiteDualNet : public DualNet {
   }
 
  private:
+  std::string model_path_;
+
   std::unique_ptr<tflite::FlatBufferModel> model_;
   std::unique_ptr<tflite::Interpreter> interpreter_;
 

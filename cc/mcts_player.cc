@@ -71,9 +71,9 @@ float TimeRecommendation(int move_num, float seconds_per_move, float time_limit,
          std::pow(decay_factor, std::max(player_move_num - core_moves, 0));
 }
 
-MctsPlayer::MctsPlayer(std::unique_ptr<DualNet::Client> client,
+MctsPlayer::MctsPlayer(std::unique_ptr<DualNet> dual_net,
                        const Options& options)
-    : client_(std::move(client)),
+    : dual_net_(std::move(dual_net)),
       game_root_(&dummy_stats_, {&bv_, &gv_, Color::kBlack}),
       rnd_(options.random_seed),
       options_(options) {
@@ -378,7 +378,7 @@ void MctsPlayer::ProcessLeaves(const std::vector<MctsNode*>& leaves) {
         symmetries_used_[i], raw_features.data(), features[i].data());
   }
 
-  auto result = client_->Run(std::move(features));
+  auto result = std::move(dual_net_->RunMany({std::move(features)}).front());
 
   // Record some information about the inference.
   if (!result.model.empty()) {

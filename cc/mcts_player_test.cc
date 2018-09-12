@@ -40,27 +40,13 @@ static constexpr char kAlmostDoneBoard[] = R"(
     XXXXXOOOO
     XXXXOOOOO)";
 
-class TestClient : public DualNet::Client {
- public:
-  TestClient(std::unique_ptr<DualNet> dual_net)
-      : dual_net_(std::move(dual_net)) {}
-
-  DualNet::Result Run(std::vector<DualNet::BoardFeatures>&& features) override {
-    return std::move(dual_net_->RunMany({std::move(features)}).front());
-  }
-
- protected:
-  std::unique_ptr<DualNet> dual_net_;
-};
-
 class TestablePlayer : public MctsPlayer {
   TestablePlayer(const TestablePlayer&) = delete;
   TestablePlayer& operator=(const TestablePlayer&) = delete;
 
  public:
   TestablePlayer(std::unique_ptr<DualNet> dual_net, const Options& options)
-      : MctsPlayer(absl::make_unique<TestClient>(std::move(dual_net)),
-                   options) {}
+      : MctsPlayer(std::move(dual_net), options) {}
 
   using MctsPlayer::InitializeGame;
   using MctsPlayer::PickMove;
@@ -76,7 +62,7 @@ class TestablePlayer : public MctsPlayer {
   }
 
   DualNet::Result Run(const DualNet::BoardFeatures& features) {
-    return client()->Run({features});
+    return std::move(client()->RunMany({{features}}).front());
   }
 
   std::vector<MctsNode*> TreeSearch(int virtual_losses) {
@@ -410,8 +396,6 @@ TEST(MctsPlayerTest, ExtractDataResignEnd) {
 // four connected neighbor is set true the policy is set to 0.01.
 class MergeFeaturesNet : public DualNet {
  public:
-  MergeFeaturesNet() : DualNet("MergeFeaturesNet") {}
-
   std::vector<Result> RunMany(
       std::vector<std::vector<BoardFeatures>>&& feature_vecs) override {
     std::vector<Result> results;
@@ -423,7 +407,8 @@ class MergeFeaturesNet : public DualNet {
         policies.push_back(Run(feature));
       }
       std::vector<float> values(features.size(), 0.0f);
-      results.push_back({std::move(policies), std::move(values), model_path_});
+      results.push_back(
+          {std::move(policies), std::move(values), "MergeFeaturesNet"});
     }
     return results;
   }

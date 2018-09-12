@@ -74,7 +74,7 @@ class RemoteDualNet : public DualNet, InferenceService::Service {
 
  public:
   explicit RemoteDualNet(const std::string& model_path)
-      : DualNet(model_path), batch_id_(1) {
+      : model_path_(model_path), batch_id_(1) {
     worker_thread_ = std::thread([=]() {
       std::vector<std::string> cmd_parts = {
           absl::StrCat("BOARD_SIZE=", kN),
@@ -207,6 +207,8 @@ class RemoteDualNet : public DualNet, InferenceService::Service {
   }
 
  private:
+  std::string model_path_;
+
   std::thread worker_thread_;
   std::thread server_thread_;
 

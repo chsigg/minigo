@@ -118,7 +118,7 @@ class TfDualNet : public DualNet {
 
  public:
   explicit TfDualNet(std::string model_path)
-      : DualNet(model_path), running_(true) {
+      : model_path_(model_path), running_(true) {
     // If we can't find the specified graph, try adding a .pb extension.
     auto* env = tensorflow::Env::Default();
     if (!env->FileExists(model_path).ok()) {
@@ -182,6 +182,8 @@ class TfDualNet : public DualNet {
       }
     }
   }
+
+  std::string model_path_;
 
   ThreadSafeQueue<InferenceData> queue_;
   std::vector<std::thread> worker_threads_;

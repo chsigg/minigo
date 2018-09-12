@@ -46,7 +46,7 @@ class GtpPlayer : public MctsPlayer {
     bool courtesy_pass = false;
   };
 
-  GtpPlayer(std::unique_ptr<DualNet::Client> client, const Options& options);
+  GtpPlayer(std::unique_ptr<DualNet> client, const Options& options);
 
   void Run();
 

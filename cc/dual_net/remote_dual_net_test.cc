@@ -37,14 +37,14 @@ class InferenceServerTest : public ::testing::Test {
     std::generate_n(std::back_inserter(priors_), kNumMoves, Random());
     value_ = 0.1;
     fake_dual_net_ = absl::make_unique<FakeDualNet>(priors_, value_);
-    remove_dual_net_ = NewRemoteDualNet("RemoteDualNet");
+    remote_dual_net_ = NewRemoteDualNet("RemoteDualNet");
   }
 
   std::vector<float> priors_;
   float value_;
 
   std::unique_ptr<DualNet> fake_dual_net_;
-  std::unique_ptr<DualNet> remove_dual_net_;
+  std::unique_ptr<DualNet> remote_dual_net_;
 };
 
 TEST_F(InferenceServerTest, Test) {
@@ -98,17 +98,19 @@ TEST_F(InferenceServerTest, Test) {
             static_cast<float>(src[i * DualNet::kNumBoardFeatures + j]);
       }
     }
-    std::vector<DualNet::Output> outputs =
-        std::move(fake_dual_net_->RunMany(std::move(features)).outputs);
+    DualNet::Result result =
+        std::move(fake_dual_net_->RunMany({std::move(features)}).front());
 
     // Put the outputs.
     PutOutputsRequest put_outputs_request;
     PutOutputsResponse put_outputs_response;
-    for (const auto& output : outputs) {
+    for (const auto& policy : result.policies) {
       for (int i = 0; i < kNumMoves; ++i) {
-        put_outputs_request.add_policy(output.policy[i]);
+        put_outputs_request.add_policy(policy[i]);
       }
-      put_outputs_request.add_value(output.value);
+    }
+    for (const auto& value : result.values) {
+      put_outputs_request.add_value(value);
     }
     put_outputs_request.set_batch_id(get_features_response.batch_id());
     {
@@ -121,11 +123,13 @@ TEST_F(InferenceServerTest, Test) {
   });
 
   std::vector<DualNet::BoardFeatures> features(16);
-  auto result = remove_dual_net_->RunMany(std::move(features));
-  for (const auto& output : result.outputs) {
-    ASSERT_EQ(output.value, value_);
-    ASSERT_EQ(std::equal(priors_.begin(), priors_.end(), output.policy.begin()),
-              true);
+  auto result =
+      std::move(remote_dual_net_->RunMany({std::move(features)}).front());
+  for (const auto& policy : result.policies) {
+    ASSERT_EQ(std::equal(priors_.begin(), priors_.end(), policy.begin()), true);
+  }
+  for (const auto& value : result.values) {
+    ASSERT_EQ(value, value_);
   }
 
   server_thread.join();

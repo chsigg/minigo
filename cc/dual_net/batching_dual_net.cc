@@ -1,4 +1,4 @@
-#include "cc/dual_net/batching_client.h"
+#include "cc/dual_net/batching_dual_net.h"
 
 #include "absl/memory/memory.h"
 #include "absl/synchronization/mutex.h"
@@ -36,22 +36,37 @@ class BatchingService {
     MaybeRunBatches();
   }
 
-  // Runs inference on a batch of input features aynchronously.
-  DualNet::Result Run(std::vector<DualNet::BoardFeatures>&& features) {
-    size_t num_features = features.size();
-    MG_CHECK(num_features <= static_cast<size_t>(FLAGS_batch_size));
-
-    std::promise<DualNet::Result> promise;
-    auto future = promise.get_future();
+  std::vector<DualNet::Result> RunMany(
+      std::vector<std::vector<DualNet::BoardFeatures>>&& feature_vecs) {
+    std::vector<std::future<DualNet::Result>> futures;
+    futures.reserve(feature_vecs.size());
 
     {
       absl::MutexLock lock(&mutex_);
-      queue_counter_ += num_features;
-      inference_queue_.push({std::move(features), std::move(promise)});
+
+      size_t old_queue_counter = queue_counter_;
+      for (auto& features : feature_vecs) {
+        size_t num_features = features.size();
+        MG_CHECK(num_features <= static_cast<size_t>(FLAGS_batch_size));
+
+        std::promise<DualNet::Result> promise;
+        futures.push_back(std::move(promise.get_future()));
+
+        queue_counter_ += num_features;
+        inference_queue_.push({std::move(features), std::move(promise)});
+      }
+      client_counters_.push(queue_counter_ - old_queue_counter);
+
       MaybeRunBatches();
     }
 
-    return future.get();
+    std::vector<DualNet::Result> results;
+    results.reserve(futures.size());
+    for (auto& future : futures) {
+      results.push_back(std::move(future.get()));
+    }
+
+    return results;
   }
 
  private:
@@ -61,7 +76,7 @@ class BatchingService {
                         static_cast<size_t>(FLAGS_batch_size))) {
       // Stop if we won't fill a batch yet but more request will come.
       if (static_cast<int>(batch_size) < FLAGS_batch_size &&
-          num_clients_ > inference_queue_.size()) {
+          num_clients_ > client_counters_.size()) {
         break;
       }
 
@@ -69,7 +84,7 @@ class BatchingService {
     }
   }
 
-  void RunBatch(size_t batch_size) {
+  void RunBatch(size_t batch_size) EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
     std::vector<std::vector<DualNet::BoardFeatures>> features;
     std::vector<std::promise<DualNet::Result>> promises;
 
@@ -87,12 +102,20 @@ class BatchingService {
       inference_queue_.pop();
       batch_size -= num_features;
       run_counter_ += num_features;
+
+      client_counters_.front() -= num_features;
+      if (0 == client_counters_.front()) {
+        client_counters_.pop();
+      }
     }
 
+    // Unlock the mutex while running inference.
+    mutex_.Unlock();
     auto results = dual_net_->RunMany(std::move(features));
     for (size_t i = 0; i < results.size(); ++i) {
       promises[i].set_value(std::move(results[i]));
     }
+    mutex_.Lock();
 
     ++num_runs_;
   }
@@ -104,56 +127,50 @@ class BatchingService {
   size_t num_clients_ GUARDED_BY(&mutex_);
 
   std::queue<InferenceData> inference_queue_ GUARDED_BY(&mutex_);
-  // Number of features pushed to queue
+  // Number of features pushed to inference queue.
   size_t queue_counter_ GUARDED_BY(&mutex_);
-  // Number of features pushed to dual net.
+  // Number of features popped from inference queue.
   size_t run_counter_ GUARDED_BY(&mutex_);
+  // Number of features currently in inference queue, per client.
+  std::queue<size_t> client_counters_ GUARDED_BY(&mutex_);
 
   // For printing batching stats in the destructor only.
   size_t num_runs_ GUARDED_BY(&mutex_);
 };
 
-class WeakBatchingClient : public DualNet::Client {
+class BatchingDualNet : public DualNet {
  public:
-  WeakBatchingClient(BatchingService* service) : service_(service) {}
-
-  DualNet::Result Run(std::vector<DualNet::BoardFeatures>&& features) override {
-    return service_->Run(std::move(features));
+  BatchingDualNet(BatchingService* service) : service_(service) {
+    service_->IncrementClientCount();
   }
+
+  ~BatchingDualNet() override { service_->DecrementClientCount(); }
+
+  std::vector<Result> RunMany(
+      std::vector<std::vector<BoardFeatures>>&& feature_vecs) override {
+    return service_->RunMany(std::move(feature_vecs));
+  };
 
  protected:
   BatchingService* service_;
 };
 
-class CountedBatchingClient : public WeakBatchingClient {
+class BatchingFactory : public DualNet::Factory {
  public:
-  CountedBatchingClient(BatchingService* service)
-      : WeakBatchingClient(service) {
-    service_->IncrementClientCount();
-  }
-
-  ~CountedBatchingClient() override { service_->DecrementClientCount(); }
-};
-
-class BatchingClientFactory : public DualNet::ClientFactory {
- public:
-  explicit BatchingClientFactory(std::unique_ptr<DualNet> dual_net)
+  explicit BatchingFactory(std::unique_ptr<DualNet> dual_net)
       : service_(std::move(dual_net)) {}
 
-  std::unique_ptr<DualNet::Client> New(bool weak) override {
-    if (weak) {
-      return absl::make_unique<WeakBatchingClient>(&service_);
-    }
-    return absl::make_unique<CountedBatchingClient>(&service_);
+ private:
+  std::unique_ptr<DualNet> New() override {
+    return absl::make_unique<BatchingDualNet>(&service_);
   }
 
- private:
   BatchingService service_;
 };
 }  // namespace
 
-std::unique_ptr<DualNet::ClientFactory> NewBatchingClientFactory(
+std::unique_ptr<DualNet::Factory> NewBatchingFactory(
     std::unique_ptr<DualNet> dual_net) {
-  return absl::make_unique<BatchingClientFactory>(std::move(dual_net));
+  return absl::make_unique<BatchingFactory>(std::move(dual_net));
 }
 }  // namespace minigo

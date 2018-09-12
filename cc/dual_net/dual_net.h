@@ -68,44 +68,24 @@ class DualNet {
     std::string model;
   };
 
-  class ClientFactory;
-
-  // Base class to perform inferences on a single batch of features.
-  class Client {
-    Client(const Client&) = delete;
-    Client& operator=(const Client&) = delete;
+  class Factory {
+    Factory(const Factory&) = delete;
+    Factory& operator=(const Factory&) = delete;
 
    public:
-    Client();
-    virtual ~Client();
+    Factory();
 
-    // Runs inference on a batch of input features. Thread-safe.
-    virtual Result Run(std::vector<BoardFeatures>&& features) = 0;
+    virtual ~Factory();
+
+    // Creates a new DualNet.
+    virtual std::unique_ptr<DualNet> New() = 0;
   };
-
-  class ClientFactory {
-    ClientFactory(const ClientFactory&) = delete;
-    ClientFactory& operator=(const ClientFactory&) = delete;
-
-   public:
-    ClientFactory();
-
-    virtual ~ClientFactory();
-
-    // Creates a new client. There needs to be exactly one non-weak client per
-    // MctsPlayer when calling SuggestMove().
-    virtual std::unique_ptr<Client> New(bool weak = false) = 0;
-  };
-
-  explicit DualNet(const std::string& model_path);
 
   virtual ~DualNet();
 
   // Runs inference on multiple batches of input features.
   virtual std::vector<Result> RunMany(
       std::vector<std::vector<BoardFeatures>>&& feature_vecs) = 0;
-
-  const std::string& name() const { return model_path_; }
 
   // Generates the board features from the history of recent moves, where
   // history[0] is the current board position, and history[i] is the board
@@ -115,11 +95,9 @@ class DualNet {
   // don't need to depend on position.h.
   static void SetFeatures(absl::Span<const Position::Stones* const> history,
                           Color to_play, BoardFeatures* features);
-
- protected:
-  std::string model_path_;
 };
 
+// Returns GPU IDs to use for inference.
 std::vector<int> GetGpuIds();
 
 }  // namespace minigo

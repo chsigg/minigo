@@ -247,7 +247,7 @@ class SelfPlayer {
  public:
   void Run() {
     auto start_time = absl::Now();
-    factory_ = NewDualNetClientFactory(FLAGS_model);
+    factory_ = NewDualNetFactory(FLAGS_model);
     std::cerr << "DualNet factory created from " << FLAGS_model << " in "
               << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
               << std::endl;
@@ -454,7 +454,7 @@ class SelfPlayer {
     }
   }
 
-  std::unique_ptr<DualNet::ClientFactory> factory_;
+  std::unique_ptr<DualNet::Factory> factory_;
 
   absl::Mutex mutex_;
   Random rnd_ GUARDED_BY(&mutex_);
@@ -501,11 +501,30 @@ class EvenEvaluator {
     size_t generation_ GUARDED_BY(&mutex_);
   };
 
+  class WrappedDualNet : public DualNet {
+   public:
+    explicit WrappedDualNet(const std::unique_ptr<DualNet>& dual_net)
+        : dual_net_(dual_net) {}
+
+   private:
+    std::vector<DualNet::Result> RunMany(
+        std::vector<std::vector<DualNet::BoardFeatures>>&& feature_vecs)
+        override {
+      return dual_net_->RunMany(std::move(feature_vecs));
+    };
+
+    const std::unique_ptr<DualNet>& dual_net_;
+  };
+
  public:
   void Run() {
     auto start_time = absl::Now();
-    prev_factory_ = NewDualNetClientFactory(FLAGS_model);
-    cur_factory_ = NewDualNetClientFactory(FLAGS_model_two);
+
+    prev_name_ = static_cast<std::string>(file::Stem(FLAGS_model));
+    cur_name_ = static_cast<std::string>(file::Stem(FLAGS_model_two));
+
+    prev_factory_ = NewDualNetFactory(FLAGS_model);
+    cur_factory_ = NewDualNetFactory(FLAGS_model_two);
     std::cerr << "DualNet factories created from " << FLAGS_model << "\n  and "
               << FLAGS_model_two << " in "
               << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
@@ -542,36 +561,46 @@ class EvenEvaluator {
 
  private:
   void ThreadRun(int thread_id) {
+    auto* factory = prev_factory_.get();
+    auto* other_factory = cur_factory_.get();
+
+    const auto* name = &prev_name_;
+    const auto* other_name = &cur_name_;
+
+    if (thread_id < FLAGS_parallel_games) {
+      // Swap black and white so that the current model opens the game.
+      std::swap(factory, other_factory);
+      std::swap(name, other_name);
+      // Wait for previous model players to open their games.
+      barrier_->Wait();
+    }
+
     auto options = options_;
     if (options.random_seed != 0) {
       options.random_seed += 1299283 * thread_id;
     }
 
-    options.name = static_cast<std::string>(file::Stem(FLAGS_model));
+    // The player and other_player reference this pointer.
+    std::unique_ptr<DualNet> dual_net;
+
     options.verbose = false;  // thread_id == 0;
-    auto black = absl::make_unique<MctsPlayer>(
-        prev_factory_->New(/*weak=*/true), options);
+    options.name = *name;
+    auto player = absl::make_unique<MctsPlayer>(
+        absl::make_unique<WrappedDualNet>(dual_net), options);
 
-    options.name = static_cast<std::string>(file::Stem(FLAGS_model_two));
     options.verbose = false;
-    auto white = absl::make_unique<MctsPlayer>(cur_factory_->New(/*weak=*/true),
-                                               options);
+    options.name = *other_name;
+    auto other_player = absl::make_unique<MctsPlayer>(
+        absl::make_unique<WrappedDualNet>(dual_net), options);
 
-    auto* factory = prev_factory_.get();
-    auto* other_factory = cur_factory_.get();
-    if (thread_id >= FLAGS_parallel_games) {
-      // Swap black and white so that current model opens the game.
-      std::swap(black, white);
-      std::swap(factory, other_factory);
-      barrier_->Wait();  // Wait for previous model players to open their games.
-    }
+    auto* black = player.get();
+    auto* white = other_player.get();
 
-    auto* player = black.get();
-    auto* other_player = white.get();
     while (!player->game_over()) {
-      auto client = factory->New();
-      barrier_->Wait();  // Wait for all threads to create client.
+      dual_net = factory->New();
+      barrier_->Wait();  // Wait for all threads to create DualNet.
       auto move = player->SuggestMove();
+      dual_net.reset();
       if (player->options().verbose) {
         std::cerr << player->root()->Describe() << "\n";
       }
@@ -580,8 +609,8 @@ class EvenEvaluator {
       if (player->options().verbose) {
         std::cerr << player->root()->position.ToPrettyString();
       }
-      std::swap(player, other_player);
       std::swap(factory, other_factory);
+      std::swap(player, other_player);
     }
     barrier_->DecrementCount();
 
@@ -606,8 +635,11 @@ class EvenEvaluator {
     // std::cerr << "Thread " << thread_id << " stopping" << std::endl;
   }
 
-  std::unique_ptr<DualNet::ClientFactory> prev_factory_;
-  std::unique_ptr<DualNet::ClientFactory> cur_factory_;
+  std::string prev_name_;
+  std::string cur_name_;
+
+  std::unique_ptr<DualNet::Factory> prev_factory_;
+  std::unique_ptr<DualNet::Factory> cur_factory_;
 
   MctsPlayer::Options options_;
 
@@ -628,7 +660,7 @@ inline bool EndsWith(const std::string& value, const std::string& ending) {
 
 void Puzzle() {
   auto start_time = absl::Now();
-  auto factory = NewDualNetClientFactory(FLAGS_model);
+  auto factory = NewDualNetFactory(FLAGS_model);
   std::cerr << "DualNet factory created from " << FLAGS_model << " in "
             << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
             << std::endl;
@@ -700,11 +732,11 @@ void Eval() {
   options.random_symmetry = true;
 
   options.name = static_cast<std::string>(file::Stem(FLAGS_model));
-  auto black_factory = NewDualNetClientFactory(FLAGS_model);
+  auto black_factory = NewDualNetFactory(FLAGS_model);
   auto black = absl::make_unique<MctsPlayer>(black_factory->New(), options);
 
   options.name = static_cast<std::string>(file::Stem(FLAGS_model_two));
-  auto white_factory = NewDualNetClientFactory(FLAGS_model_two);
+  auto white_factory = NewDualNetFactory(FLAGS_model_two);
   auto white = absl::make_unique<MctsPlayer>(white_factory->New(), options);
 
   auto* player = black.get();
@@ -736,8 +768,8 @@ void Gtp() {
   options.name = absl::StrCat("minigo-", file::Basename(FLAGS_model));
   options.ponder_limit = FLAGS_ponder_limit;
   options.courtesy_pass = FLAGS_courtesy_pass;
-  auto service = NewDualNetClientFactory(FLAGS_model);
-  auto player = absl::make_unique<GtpPlayer>(service->New(), options);
+  auto factory = NewDualNetFactory(FLAGS_model);
+  auto player = absl::make_unique<GtpPlayer>(factory->New(), options);
   player->Run();
 }
 

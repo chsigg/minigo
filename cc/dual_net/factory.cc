@@ -3,7 +3,7 @@
 #include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
-#include "cc/dual_net/batching_client.h"
+#include "cc/dual_net/batching_dual_net.h"
 #include "gflags/gflags.h"
 
 #ifdef MG_ENABLE_REMOTE_DUAL_NET
@@ -92,9 +92,9 @@ std::unique_ptr<DualNet> NewDualNet(const std::string& model_path) {
 
 }  // namespace
 
-std::unique_ptr<DualNet::ClientFactory> NewDualNetClientFactory(
+std::unique_ptr<DualNet::Factory> NewDualNetFactory(
     const std::string& model_path) {
-  return NewBatchingClientFactory(NewDualNet(model_path));
+  return NewBatchingFactory(NewDualNet(model_path));
 }
 
 }  // namespace minigo

@@ -31,8 +31,7 @@
 
 namespace minigo {
 
-GtpPlayer::GtpPlayer(std::unique_ptr<DualNet::Client> client,
-                     const Options& options)
+GtpPlayer::GtpPlayer(std::unique_ptr<DualNet> client, const Options& options)
     : MctsPlayer(std::move(client), options),
       ponder_limit_(options.ponder_limit),
       courtesy_pass_(options.courtesy_pass) {
