@@ -30,6 +30,21 @@ namespace minigo {
 
 namespace {
 
+bool DeviceHasNativeReducedPrecision(int device) {
+  cudaDeviceProp props;
+  MG_CHECK(cudaGetDeviceProperties(&props, device) == cudaSuccess);
+  if (props.major > 6) {
+    return true;
+  }
+  if (props.major == 6) {
+    return props.minor != 1;
+  }
+  if (props.major == 5) {
+    return props.minor >= 3;
+  }
+  return false;
+}
+
 class TrtDualNet : public DualNet {
   // TensorRT 4.0.16 ignores the input layout and always assumed NCHW.
   static constexpr auto kInputLayout = nvuffparser::UffInputOrder::kNCHW;
@@ -39,13 +54,13 @@ class TrtDualNet : public DualNet {
     void log(nvinfer1::ILogger::Severity severity, const char* msg) override {
       switch (severity) {
         case Severity::kINTERNAL_ERROR:
-          std::cerr << "TensorRT internal error: " << msg;
+          std::cerr << "TensorRT internal error: " << msg << std::endl;
           break;
         case Severity::kERROR:
-          std::cerr << "TensorRT error: " << msg;
+          std::cerr << "TensorRT error: " << msg << std::endl;
           break;
         case Severity::kWARNING:
-          std::cerr << "TensorRT warning: " << msg;
+          std::cerr << "TensorRT warning: " << msg << std::endl;
           break;
         default:
           break;
@@ -171,6 +186,12 @@ class TrtDualNet : public DualNet {
     builder->setMaxWorkspaceSize(1ull << 30);  // One gigabyte.
 
     auto gpu_ids = GetGpuIds();
+    if (std::all_of(gpu_ids.begin(), gpu_ids.end(),
+                    &DeviceHasNativeReducedPrecision)) {
+      // All GPUs support fast fp16 math, enable it.
+      builder->setFp16Mode(true);
+    }
+
     cudaSetDevice(gpu_ids.front());
     auto* engine = [&] {
       // Building TensorRT engines is not thread-safe.
