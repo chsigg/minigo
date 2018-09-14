@@ -33,8 +33,6 @@ cc_library(
          "cuda/lib64/libcudart.so",
     ],
     linkopts = ["-ldl", "-lrt", "-lpthread"],
-    alwayslink = True,
-    linkstatic = True,
 )
 
 cc_library(

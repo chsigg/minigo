@@ -53,6 +53,7 @@ class DualNet {
 
   // TODO(tommadams): Change features type from float to uint8_t.
   using StoneFeatures = std::array<float, kNumStoneFeatures>;
+  // Layout is stone-minor (i.e. history is stored consecutively).
   using BoardFeatures = std::array<float, kNumBoardFeatures>;
   using Policy = std::array<float, kNumMoves>;
 
@@ -84,8 +85,7 @@ class DualNet {
   virtual ~DualNet();
 
   // Runs inference on multiple batches of input features.
-  virtual std::vector<Result> RunMany(
-      std::vector<std::vector<BoardFeatures>>&& feature_vecs) = 0;
+  virtual Result RunMany(std::vector<BoardFeatures>&& features) = 0;
 
   // Generates the board features from the history of recent moves, where
   // history[0] is the current board position, and history[i] is the board

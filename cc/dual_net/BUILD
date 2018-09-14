@@ -182,8 +182,11 @@ minigo_cc_test_9_only(
     name = "dual_net_test",
     size = "small",
     srcs = ["dual_net_test.cc"],
+    copts = factory_engine_copts,
+    data = glob(["test_model.*"]),
     deps = [
         ":dual_net",
+        ":factory",
         "//cc:position",
         "//cc:test_utils",
         "@com_google_googletest//:gtest_main",

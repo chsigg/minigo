@@ -169,7 +169,7 @@ Coord MctsPlayer::SuggestMove() {
 Coord MctsPlayer::PickMove() {
   auto is_legal = [&](const Coord& c) {
     bool legal = root_->position.IsMoveLegal(c);
-    if (!legal && options_.verbose) {
+    if (!legal /* && options_.verbose*/) {
       std::cerr << "Picked illegal move " << c << ", passing." << std::endl;
     }
     return legal;
@@ -378,7 +378,7 @@ void MctsPlayer::ProcessLeaves(const std::vector<MctsNode*>& leaves) {
         symmetries_used_[i], raw_features.data(), features[i].data());
   }
 
-  auto result = std::move(dual_net_->RunMany({std::move(features)}).front());
+  auto result = std::move(dual_net_->RunMany(std::move(features)));
 
   // Record some information about the inference.
   if (!result.model.empty()) {

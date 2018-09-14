@@ -25,8 +25,7 @@ class FakeDualNet : public DualNet {
   explicit FakeDualNet(float value);
   FakeDualNet(std::vector<float> priors, float value);
 
-  std::vector<Result> RunMany(
-      std::vector<std::vector<BoardFeatures>>&& feature_vecs) override;
+  Result RunMany(std::vector<BoardFeatures>&& features) override;
 
  private:
   std::vector<float> priors_;

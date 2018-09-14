@@ -62,7 +62,7 @@ class TestablePlayer : public MctsPlayer {
   }
 
   DualNet::Result Run(const DualNet::BoardFeatures& features) {
-    return std::move(client()->RunMany({{features}}).front());
+    return std::move(client()->RunMany({features}));
   }
 
   std::vector<MctsNode*> TreeSearch(int virtual_losses) {
@@ -396,21 +396,14 @@ TEST(MctsPlayerTest, ExtractDataResignEnd) {
 // four connected neighbor is set true the policy is set to 0.01.
 class MergeFeaturesNet : public DualNet {
  public:
-  std::vector<Result> RunMany(
-      std::vector<std::vector<BoardFeatures>>&& feature_vecs) override {
-    std::vector<Result> results;
-    results.reserve(feature_vecs.size());
-    for (const auto& features : feature_vecs) {
-      std::vector<Policy> policies;
-      policies.reserve(features.size());
-      for (const auto& feature : features) {
-        policies.push_back(Run(feature));
-      }
-      std::vector<float> values(features.size(), 0.0f);
-      results.push_back(
-          {std::move(policies), std::move(values), "MergeFeaturesNet"});
+  Result RunMany(std::vector<BoardFeatures>&& features) override {
+    std::vector<Policy> policies;
+    policies.reserve(features.size());
+    for (const auto& feature : features) {
+      policies.push_back(Run(feature));
     }
-    return results;
+    std::vector<float> values(features.size(), 0.0f);
+    return {std::move(policies), std::move(values), "MergeFeaturesNet"};
   }
 
  private:

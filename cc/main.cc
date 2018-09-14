@@ -507,24 +507,34 @@ class EvenEvaluator {
         : dual_net_(dual_net) {}
 
    private:
-    std::vector<DualNet::Result> RunMany(
-        std::vector<std::vector<DualNet::BoardFeatures>>&& feature_vecs)
-        override {
-      return dual_net_->RunMany(std::move(feature_vecs));
+    Result RunMany(std::vector<BoardFeatures>&& features) override {
+      return dual_net_->RunMany(std::move(features));
     };
 
     const std::unique_ptr<DualNet>& dual_net_;
+  };
+
+  struct Model {
+    std::string name;
+    std::unique_ptr<DualNet::Factory> factory;
+    std::atomic<int> wins;
   };
 
  public:
   void Run() {
     auto start_time = absl::Now();
 
-    prev_name_ = static_cast<std::string>(file::Stem(FLAGS_model));
-    cur_name_ = static_cast<std::string>(file::Stem(FLAGS_model_two));
+    auto create_model = [](const std::string& model_path) {
+      auto model = absl::make_unique<Model>();
+      model->name = static_cast<std::string>(file::Stem(model_path));
+      model->factory = NewDualNetFactory(model_path);
+      model->wins = 0;
+      return model;
+    };
 
-    prev_factory_ = NewDualNetFactory(FLAGS_model);
-    cur_factory_ = NewDualNetFactory(FLAGS_model_two);
+    auto prev_model = create_model(FLAGS_model);
+    auto cur_model = create_model(FLAGS_model_two);
+
     std::cerr << "DualNet factories created from " << FLAGS_model << "\n  and "
               << FLAGS_model_two << " in "
               << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
@@ -537,12 +547,16 @@ class EvenEvaluator {
 
     int num_games = FLAGS_parallel_games;
     barrier_ = absl::make_unique<Barrier>(2 * num_games);
-    results_ = 0;
 
     for (int i = 0; i < num_games; ++i) {
-      threads_.emplace_back(std::bind(&EvenEvaluator::ThreadRun, this, i));
-      threads_.emplace_back(
-          std::bind(&EvenEvaluator::ThreadRun, this, i + num_games));
+      threads_.emplace_back(std::bind(&EvenEvaluator::ThreadRun, this, i,
+                                      cur_model.get(), prev_model.get()));
+
+      threads_.emplace_back([&, i] {
+        barrier_->Wait();  // Wait for the other games to open (make the first
+                           // move).
+        ThreadRun(i + num_games, prev_model.get(), cur_model.get());
+      });
     }
 
     for (auto& t : threads_) {
@@ -553,48 +567,40 @@ class EvenEvaluator {
               << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
               << std::endl;
 
-    float win_ratio = 0.5f + results_ / (4.0f * num_games);
-    std::cout << FLAGS_model_two << " won " << std::fixed
-              << std::setprecision(1) << win_ratio * 100 << "% of them."
-              << std::endl;
+    auto print_result = [&](const Model& model) {
+      std::cout << model.name << " won " << std::fixed << std::setprecision(1)
+                << model.wins * 50.0f / num_games << "% of them." << std::endl;
+    };
+
+    print_result(*prev_model);
+    print_result(*cur_model);
   }
 
  private:
-  void ThreadRun(int thread_id) {
-    auto* factory = prev_factory_.get();
-    auto* other_factory = cur_factory_.get();
-
-    const auto* name = &prev_name_;
-    const auto* other_name = &cur_name_;
-
-    if (thread_id < FLAGS_parallel_games) {
-      // Swap black and white so that the current model opens the game.
-      std::swap(factory, other_factory);
-      std::swap(name, other_name);
-      // Wait for previous model players to open their games.
-      barrier_->Wait();
-    }
+  void ThreadRun(int thread_id, Model* model, Model* other_model) {
+    // The player and other_player reference this pointer.
+    std::unique_ptr<DualNet> dual_net;
 
     auto options = options_;
     if (options.random_seed != 0) {
       options.random_seed += 1299283 * thread_id;
     }
 
-    // The player and other_player reference this pointer.
-    std::unique_ptr<DualNet> dual_net;
-
     options.verbose = false;  // thread_id == 0;
-    options.name = *name;
+    options.name = model->name;
     auto player = absl::make_unique<MctsPlayer>(
         absl::make_unique<WrappedDualNet>(dual_net), options);
 
     options.verbose = false;
-    options.name = *other_name;
+    options.name = other_model->name;
     auto other_player = absl::make_unique<MctsPlayer>(
         absl::make_unique<WrappedDualNet>(dual_net), options);
 
     auto* black = player.get();
     auto* white = other_player.get();
+
+    auto* factory = model->factory.get();
+    auto* other_factory = other_model->factory.get();
 
     while (!player->game_over()) {
       dual_net = factory->New();
@@ -615,8 +621,12 @@ class EvenEvaluator {
     barrier_->DecrementCount();
 
     MG_CHECK(player->result() == other_player->result());
-    int result = player->result();
-    results_ += thread_id < FLAGS_parallel_games ? -result : result;
+    if (player->result() > 0) {
+      ++model->wins;
+    }
+    if (player->result() < 0) {
+      ++other_model->wins;
+    }
 
     if (black->options().verbose) {
       std::cerr << "Black (" << black->name()
@@ -635,18 +645,9 @@ class EvenEvaluator {
     // std::cerr << "Thread " << thread_id << " stopping" << std::endl;
   }
 
-  std::string prev_name_;
-  std::string cur_name_;
-
-  std::unique_ptr<DualNet::Factory> prev_factory_;
-  std::unique_ptr<DualNet::Factory> cur_factory_;
-
   MctsPlayer::Options options_;
-
   std::unique_ptr<Barrier> barrier_;
-
   std::vector<std::thread> threads_;
-  std::atomic<int> results_;
 };
 
 void SelfPlay() { SelfPlayer().Run(); }
@@ -774,7 +775,6 @@ void Gtp() {
 }
 
 }  // namespace
-
 }  // namespace minigo
 
 int main(int argc, char* argv[]) {

@@ -14,13 +14,28 @@
 
 #include "cc/dual_net/dual_net.h"
 
+#include <unistd.h>
 #include <array>
 #include <deque>
 #include <vector>
 
 #include "cc/position.h"
+#include "cc/random.h"
 #include "cc/test_utils.h"
 #include "gtest/gtest.h"
+
+#if MG_ENABLE_TF_DUAL_NET
+#include "cc/dual_net/tf_dual_net.h"
+#endif
+#if MG_ENABLE_REMOTE_DUAL_NET
+#include "cc/dual_net/remote_dual_net.h"
+#endif
+#if MG_ENABLE_LIGHT_DUAL_NET
+#include "cc/dual_net/light_dual_net.h"
+#endif
+#if MG_ENABLE_TRT_DUAL_NET
+#include "cc/dual_net/trt_dual_net.h"
+#endif
 
 namespace minigo {
 namespace {
@@ -123,6 +138,62 @@ TEST(DualNetTest, TestStoneFeaturesWithCapture) {
   StoneFeatures j2 = {0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   EXPECT_EQ(j2, GetStoneFeatures(features, Coord::FromString("J2")));
 }
+
+TEST(DualNetTest, TestBackendsEqual) {
+  using Function = std::unique_ptr<DualNet> (*)(const std::string&);
+  std::vector<std::pair<std::string, Function>> factories;
+
+#if MG_ENABLE_TF_DUAL_NET
+  factories.emplace_back("TfDualNet", &NewTfDualNet);
+#endif
+#if MG_ENABLE_REMOTE_DUAL_NET
+  factories.emplace_back("RemoteDualNet", &NewRemoteDualNet);
+#endif
+#if MG_ENABLE_LIGHT_DUAL_NET
+  factories.emplace_back("LiteDualNet", &NewLiteDualNet);
+#endif
+#if MG_ENABLE_TRT_DUAL_NET
+  factories.emplace_back("TrtDualNet", &NewTrtDualNet);
+#endif
+
+  DualNet::BoardFeatures features;
+  Random().Uniform(0.0f, 1.0f, absl::MakeSpan(features));
+
+  std::string name;
+  DualNet::Policy policy;
+  float value = 0.0f;
+
+  auto policy_string = [](const DualNet::Policy& policy) {
+    std::ostringstream oss;
+    std::copy(policy.begin(), policy.end(),
+              std::ostream_iterator<float>(oss, " "));
+    return oss.str();
+  };
+
+  for (const auto& pair : factories) {
+    auto result = pair.second("cc/dual_net/test_model")->RunMany({features});
+
+    if (name.empty()) {
+      name = pair.first;
+      policy = result.policies.front();
+      value = result.values.front();
+
+      continue;
+    }
+
+    auto pred = [](float left, float right) {
+      return std::abs(left - right) <
+             0.0001f * (1.0f + std::abs(left) + std::abs(right));
+    };
+    EXPECT_EQ(std::equal(policy.begin(), policy.end(),
+                         result.policies.front().begin(), pred),
+              true)
+        << name << ": " << policy_string(policy) << std::endl
+        << pair.first << ": " << policy_string(result.policies.front());
+    EXPECT_NEAR(value, result.values.front(), 0.0001f)
+        << name << " vs " << pair.first;
+  }
+}  // namespace
 
 }  // namespace
 }  // namespace minigo

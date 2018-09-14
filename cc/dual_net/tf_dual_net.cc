@@ -64,22 +64,16 @@ class TfDualNet : public DualNet {
       }
     }
 
-    std::vector<Result> RunMany(
-        std::vector<std::vector<BoardFeatures>>&& feature_vecs) {
+    Result RunMany(std::vector<BoardFeatures>&& features) {
+      size_t num_features = features.size();
+
       // Copy the features into the input tensor.
       auto* feature_data = inputs_.front().second.flat<float>().data();
-      std::vector<size_t> feature_counts;
-      feature_counts.reserve(feature_vecs.size());
-      for (const auto& features : feature_vecs) {
-        // Copy the features into the input tensor.
-        for (const auto& feature : features) {
-          feature_data =
-              std::copy(feature.begin(), feature.end(), feature_data);
-        }
-        feature_counts.push_back(features.size());
-      }
-      // Deallocate feature_vecs memory.
-      std::vector<std::vector<BoardFeatures>>().swap(feature_vecs);
+      // Copy the features into the input tensor.
+      std::copy_n(features.front().begin(), kNumBoardFeatures * num_features,
+                  feature_data);
+      // Deallocate features memory.
+      std::vector<BoardFeatures>().swap(features);
 
       // Run the model.
       TF_CHECK_OK(session_->Run(inputs_, output_names_, {}, &outputs_));
@@ -87,21 +81,15 @@ class TfDualNet : public DualNet {
       // Copy the policies and values from the output tensors.
       const auto* policy_data = outputs_[0].flat<float>().data();
       const auto* value_data = outputs_[1].flat<float>().data();
-      std::vector<Result> results;
-      results.reserve(feature_counts.size());
-      for (size_t num_features : feature_counts) {
-        std::vector<Policy> policies(num_features);
-        std::copy_n(policy_data, kNumMoves * num_features,
-                    policies.front().data());
-        policy_data += kNumMoves * num_features;
 
-        std::vector<float> values(num_features);
-        std::copy_n(value_data, num_features, values.data());
-        value_data += num_features;
+      std::vector<Policy> policies(num_features);
+      std::copy_n(policy_data, kNumMoves * num_features,
+                  policies.front().data());
 
-        results.push_back({std::move(policies), std::move(values)});
-      }
-      return results;
+      std::vector<float> values(num_features);
+      std::copy_n(value_data, num_features, values.data());
+
+      return {std::move(policies), std::move(values)};
     }
 
    private:
@@ -112,8 +100,8 @@ class TfDualNet : public DualNet {
   };
 
   struct InferenceData {
-    std::vector<std::vector<BoardFeatures>> feature_vecs;
-    std::promise<std::vector<Result>> promise;
+    std::vector<BoardFeatures> features;
+    std::promise<Result> promise;
   };
 
  public:
@@ -133,11 +121,9 @@ class TfDualNet : public DualNet {
       while (running_) {
         InferenceData inference;
         if (queue_.PopWithTimeout(&inference, absl::Seconds(1))) {
-          auto results = worker.RunMany(std::move(inference.feature_vecs));
-          for (auto& result : results) {
-            result.model = model_path_;
-          }
-          inference.promise.set_value(std::move(results));
+          auto result = worker.RunMany(std::move(inference.features));
+          result.model = model_path_;
+          inference.promise.set_value(std::move(result));
         }
       }
     };
@@ -158,11 +144,10 @@ class TfDualNet : public DualNet {
     }
   }
 
-  std::vector<Result> RunMany(
-      std::vector<std::vector<BoardFeatures>>&& feature_vecs) override {
-    std::promise<std::vector<Result>> promise;
+  Result RunMany(std::vector<BoardFeatures>&& features) override {
+    std::promise<Result> promise;
     auto future = promise.get_future();
-    queue_.Push({std::move(feature_vecs), std::move(promise)});
+    queue_.Push({std::move(features), std::move(promise)});
     return future.get();
   }
 

@@ -36,37 +36,23 @@ class BatchingService {
     MaybeRunBatches();
   }
 
-  std::vector<DualNet::Result> RunMany(
-      std::vector<std::vector<DualNet::BoardFeatures>>&& feature_vecs) {
-    std::vector<std::future<DualNet::Result>> futures;
-    futures.reserve(feature_vecs.size());
+  DualNet::Result RunMany(std::vector<DualNet::BoardFeatures>&& features) {
+    size_t num_features = features.size();
+    MG_CHECK(num_features <= static_cast<size_t>(FLAGS_batch_size));
+
+    std::promise<DualNet::Result> promise;
+    std::future<DualNet::Result> future = promise.get_future();
 
     {
       absl::MutexLock lock(&mutex_);
 
-      size_t old_queue_counter = queue_counter_;
-      for (auto& features : feature_vecs) {
-        size_t num_features = features.size();
-        MG_CHECK(num_features <= static_cast<size_t>(FLAGS_batch_size));
-
-        std::promise<DualNet::Result> promise;
-        futures.push_back(std::move(promise.get_future()));
-
-        queue_counter_ += num_features;
-        inference_queue_.push({std::move(features), std::move(promise)});
-      }
-      client_counters_.push(queue_counter_ - old_queue_counter);
+      queue_counter_ += num_features;
+      inference_queue_.push({std::move(features), std::move(promise)});
 
       MaybeRunBatches();
     }
 
-    std::vector<DualNet::Result> results;
-    results.reserve(futures.size());
-    for (auto& future : futures) {
-      results.push_back(std::move(future.get()));
-    }
-
-    return results;
+    return future.get();
   }
 
  private:
@@ -76,7 +62,7 @@ class BatchingService {
                         static_cast<size_t>(FLAGS_batch_size))) {
       // Stop if we won't fill a batch yet but more request will come.
       if (static_cast<int>(batch_size) < FLAGS_batch_size &&
-          num_clients_ > client_counters_.size()) {
+          num_clients_ > inference_queue_.size()) {
         break;
       }
 
@@ -85,8 +71,11 @@ class BatchingService {
   }
 
   void RunBatch(size_t batch_size) EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
-    std::vector<std::vector<DualNet::BoardFeatures>> features;
+    std::vector<DualNet::BoardFeatures> features;
+    features.reserve(batch_size);
+
     std::vector<std::promise<DualNet::Result>> promises;
+    std::vector<size_t> feature_counts;
 
     while (batch_size > 0) {
       auto& inference = inference_queue_.front();
@@ -96,24 +85,31 @@ class BatchingService {
         break;  // Request doesn't fit anymore.
       }
 
-      features.push_back(std::move(inference.features));
+      std::copy_n(inference.features.begin(), num_features,
+                  std::back_inserter(features));
       promises.push_back(std::move(inference.promise));
 
       inference_queue_.pop();
       batch_size -= num_features;
       run_counter_ += num_features;
-
-      client_counters_.front() -= num_features;
-      if (0 == client_counters_.front()) {
-        client_counters_.pop();
-      }
+      feature_counts.push_back(num_features);
     }
 
     // Unlock the mutex while running inference.
     mutex_.Unlock();
-    auto results = dual_net_->RunMany(std::move(features));
-    for (size_t i = 0; i < results.size(); ++i) {
-      promises[i].set_value(std::move(results[i]));
+    auto result = dual_net_->RunMany(std::move(features));
+    auto policy_it = result.policies.begin();
+    auto value_it = result.values.begin();
+    auto promise_it = promises.begin();
+    for (auto num_features : feature_counts) {
+      std::vector<DualNet::Policy> policies(policy_it,
+                                            policy_it + num_features);
+      policy_it += num_features;
+      std::vector<float> values(value_it, value_it + num_features);
+      value_it += num_features;
+      promise_it->set_value(
+          {std::move(policies), std::move(values), result.model});
+      ++promise_it;
     }
     mutex_.Lock();
 
@@ -131,8 +127,6 @@ class BatchingService {
   size_t queue_counter_ GUARDED_BY(&mutex_);
   // Number of features popped from inference queue.
   size_t run_counter_ GUARDED_BY(&mutex_);
-  // Number of features currently in inference queue, per client.
-  std::queue<size_t> client_counters_ GUARDED_BY(&mutex_);
 
   // For printing batching stats in the destructor only.
   size_t num_runs_ GUARDED_BY(&mutex_);
@@ -146,9 +140,8 @@ class BatchingDualNet : public DualNet {
 
   ~BatchingDualNet() override { service_->DecrementClientCount(); }
 
-  std::vector<Result> RunMany(
-      std::vector<std::vector<BoardFeatures>>&& feature_vecs) override {
-    return service_->RunMany(std::move(feature_vecs));
+  Result RunMany(std::vector<BoardFeatures>&& features) override {
+    return service_->RunMany(std::move(features));
   };
 
  protected:

@@ -14,6 +14,7 @@
 
 #include "cc/dual_net/trt_dual_net.h"
 
+#include <bitset>
 #include <fstream>
 
 #include "absl/memory/memory.h"
@@ -30,6 +31,9 @@ namespace minigo {
 namespace {
 
 class TrtDualNet : public DualNet {
+  // TensorRT 4.0.16 ignores the input layout and always assumed NCHW.
+  static constexpr auto kInputLayout = nvuffparser::UffInputOrder::kNCHW;
+
   class TrtLogger : public nvinfer1::ILogger {
    public:
     void log(nvinfer1::ILogger::Severity severity, const char* msg) override {
@@ -75,48 +79,56 @@ class TrtDualNet : public DualNet {
       context_->destroy();
     }
 
-    std::vector<Result> RunMany(
-        std::vector<std::vector<BoardFeatures>>&& feature_vecs) {
-      // Copy the features into the input tensor.
-      auto* feature_data = pos_tensor_;
-      std::vector<size_t> feature_counts;
-      feature_counts.reserve(feature_vecs.size());
-      for (const auto& features : feature_vecs) {
-        // Copy the features into the input tensor.
-        for (const auto& feature : features) {
-          feature_data =
-              std::copy(feature.begin(), feature.end(), feature_data);
+    Result RunMany(std::vector<BoardFeatures>&& features) {
+      size_t num_features = features.size();
+
+      if (kInputLayout == nvuffparser::UffInputOrder::kNCHW) {
+        for (auto& feature : features) {
+          TransposeBoardFeatures(&feature);
         }
-        feature_counts.push_back(features.size());
       }
-      // Deallocate feature_vecs memory.
-      std::vector<std::vector<BoardFeatures>>().swap(feature_vecs);
+
+      // Copy the features into the input tensor.
+      std::copy_n(features.front().begin(), kNumBoardFeatures * num_features,
+                  pos_tensor_);
+      // Deallocate features memory.
+      std::vector<BoardFeatures>().swap(features);
 
       // Run the model.
       void* buffers[] = {pos_tensor_, policy_output_, value_output_};
       context_->execute(FLAGS_batch_size, buffers);
 
       // Copy the policy and value out of the output tensors.
-      const auto* policy_data = policy_output_;
-      const auto* value_data = value_output_;
-      std::vector<Result> results;
-      results.reserve(feature_counts.size());
-      for (size_t num_features : feature_counts) {
-        std::vector<Policy> policies(num_features);
-        std::copy_n(policy_data, kNumMoves * num_features,
-                    policies.front().data());
-        policy_data += kNumMoves * num_features;
+      std::vector<Policy> policies(num_features);
+      std::copy_n(policy_output_, kNumMoves * num_features,
+                  policies.front().data());
 
-        std::vector<float> values(num_features);
-        std::copy_n(value_data, num_features, values.data());
-        value_data += num_features;
+      std::vector<float> values(num_features);
+      std::copy_n(value_output_, num_features, values.data());
 
-        results.push_back({std::move(policies), std::move(values)});
-      }
-      return results;
+      return {std::move(policies), std::move(values)};
     }
 
    private:
+    // Transposes features layout in-place from HWC to CHW.
+    void TransposeBoardFeatures(BoardFeatures* features) {
+      auto* data = features->data();
+      std::bitset<kNumBoardFeatures> visited;
+      size_t i = 0;
+      for (size_t column = 0; column < kNumStoneFeatures; ++column) {
+        for (size_t row = 0; row < kN * kN; ++row) {
+          float value = data[i];
+          while (!visited[i]) {
+            visited.set(i);
+            // Convert index from row-major to column-major.
+            i = i % kNumStoneFeatures * kN * kN + i / kNumStoneFeatures;
+            std::swap(value, data[i]);
+          }
+          ++i;
+        }
+      }
+    }
+
     nvinfer1::IExecutionContext* context_;
 
     float* pos_tensor_;
@@ -125,8 +137,8 @@ class TrtDualNet : public DualNet {
   };
 
   struct InferenceData {
-    std::vector<std::vector<BoardFeatures>> feature_vecs;
-    std::promise<std::vector<Result>> promise;
+    std::vector<BoardFeatures> features;
+    std::promise<Result> promise;
   };
 
  public:
@@ -139,7 +151,7 @@ class TrtDualNet : public DualNet {
 
     parser->registerInput("pos_tensor",
                           nvinfer1::DimsCHW(DualNet::kNumStoneFeatures, kN, kN),
-                          nvuffparser::UffInputOrder::kNCHW);
+                          kInputLayout);
 
     parser->registerOutput("policy_output");
     parser->registerOutput("value_output");
@@ -198,11 +210,9 @@ class TrtDualNet : public DualNet {
       while (running_) {
         InferenceData inference;
         if (queue_.PopWithTimeout(&inference, absl::Seconds(1))) {
-          auto results = worker.RunMany(std::move(inference.feature_vecs));
-          for (auto& result : results) {
-            result.model = model_path_;
-          }
-          inference.promise.set_value(std::move(results));
+          auto result = worker.RunMany(std::move(inference.features));
+          result.model = model_path_;
+          inference.promise.set_value(std::move(result));
         }
       }
     };
@@ -228,11 +238,10 @@ class TrtDualNet : public DualNet {
     runtime_->destroy();
   }
 
-  std::vector<Result> RunMany(
-      std::vector<std::vector<BoardFeatures>>&& feature_vecs) override {
-    std::promise<std::vector<Result>> promise;
+  Result RunMany(std::vector<BoardFeatures>&& features) override {
+    std::promise<Result> promise;
     auto future = promise.get_future();
-    queue_.Push({std::move(feature_vecs), std::move(promise)});
+    queue_.Push({std::move(features), std::move(promise)});
     return future.get();
   }
 

@@ -63,13 +63,13 @@ namespace {
 // InferenceService.
 class RemoteDualNet : public DualNet, InferenceService::Service {
   struct InferenceData {
-    std::vector<std::vector<BoardFeatures>> feature_vecs;
-    std::promise<std::vector<Result>> promise;
+    std::vector<BoardFeatures> features;
+    std::promise<Result> promise;
   };
 
   struct PendingData {
-    std::vector<size_t> feature_counts;
-    std::promise<std::vector<Result>> promise;
+    size_t num_features;
+    std::promise<Result> promise;
   };
 
  public:
@@ -117,11 +117,10 @@ class RemoteDualNet : public DualNet, InferenceService::Service {
     worker_thread_.join();
   }
 
-  std::vector<Result> RunMany(
-      std::vector<std::vector<BoardFeatures>>&& feature_vecs) override {
-    std::promise<std::vector<Result>> promise;
+  Result RunMany(std::vector<BoardFeatures>&& features) override {
+    std::promise<Result> promise;
     auto future = promise.get_future();
-    queue_.Push({std::move(feature_vecs), std::move(promise)});
+    queue_.Push({std::move(features), std::move(promise)});
     return future.get();
   }
 
@@ -142,16 +141,11 @@ class RemoteDualNet : public DualNet, InferenceService::Service {
       }
     }
 
-    std::vector<size_t> feature_counts;
-    feature_counts.reserve(inference.feature_vecs.size());
     std::string byte_features(FLAGS_batch_size * DualNet::kNumBoardFeatures, 0);
     auto it = byte_features.begin();
-    for (const auto& features : inference.feature_vecs) {
-      for (const auto& feature : features) {
-        it = std::transform(feature.begin(), feature.end(), it,
-                            [](float x) { return x != 0.0f ? 1 : 0; });
-      }
-      feature_counts.push_back(features.size());
+    for (const auto& feature : inference.features) {
+      it = std::transform(feature.begin(), feature.end(), it,
+                          [](float x) { return x != 0.0f ? 1 : 0; });
     }
     response->set_batch_id(batch_id_++);
     response->set_features(std::move(byte_features));
@@ -160,7 +154,7 @@ class RemoteDualNet : public DualNet, InferenceService::Service {
       absl::MutexLock lock(&pending_mutex_);
       pending_map_.emplace(
           response->batch_id(),
-          PendingData{std::move(feature_counts), std::move(inference.promise)});
+          PendingData{inference.features.size(), std::move(inference.promise)});
     }
 
     return Status::OK;
@@ -188,20 +182,17 @@ class RemoteDualNet : public DualNet, InferenceService::Service {
 
     auto policy_it = request->policy().begin();
     auto value_it = request->value().begin();
-    std::vector<Result> results;
-    results.reserve(inference.feature_counts.size());
-    for (size_t num_features : inference.feature_counts) {
-      std::vector<Policy> policies(num_features);
-      std::copy_n(policy_it, kNumMoves * num_features, policies.front().data());
-      policy_it += kNumMoves * num_features;
+    size_t num_features = inference.num_features;
+    std::vector<Policy> policies(num_features);
+    std::copy_n(policy_it, kNumMoves * num_features, policies.front().data());
+    policy_it += kNumMoves * num_features;
 
-      std::vector<float> values(num_features);
-      std::copy_n(value_it, num_features, values.data());
-      value_it += num_features;
+    std::vector<float> values(num_features);
+    std::copy_n(value_it, num_features, values.data());
+    value_it += num_features;
 
-      results.push_back({std::move(policies), std::move(values), model_path_});
-    }
-    inference.promise.set_value(std::move(results));
+    inference.promise.set_value(
+        Result{std::move(policies), std::move(values), model_path_});
 
     return Status::OK;
   }
