@@ -370,7 +370,7 @@ class SelfPlayer {
         auto move = player->SuggestMove();
         if (player->options().verbose) {
           const auto& position = player->root()->position;
-          std::cerr << player->root()->position.ToPrettyString(use_ansi_colors);
+          std::cerr << position.ToPrettyString(use_ansi_colors);
           std::cerr << "Move: " << position.n()
                     << " Captures X: " << position.num_captures()[0]
                     << " O: " << position.num_captures()[1] << std::endl;
@@ -654,9 +654,22 @@ void SelfPlay() { SelfPlayer().Run(); }
 
 void EvalEven() { EvenEvaluator().Run(); }
 
-inline bool EndsWith(const std::string& value, const std::string& ending) {
+bool EndsWith(const std::string& value, const std::string& ending) {
   if (ending.size() > value.size()) return false;
   return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
+}
+
+std::vector<std::string> GetSgfFiles() {
+  std::vector<std::string> sgf_files;
+  DIR* dirp = opendir(FLAGS_sgf_dir.c_str());
+  while (dirent* dp = readdir(dirp)) {
+    std::string filename(dp->d_name);
+    if (EndsWith(filename, ".sgf")) {
+      sgf_files.push_back(filename);
+    }
+  }
+  closedir(dirp);
+  return sgf_files;
 }
 
 void Puzzle() {
@@ -670,19 +683,9 @@ void Puzzle() {
   ParseMctsPlayerOptionsFromFlags(&options);
   options.verbose = false;
 
-  std::vector<std::string> sgf_files;
-  DIR* dirp = opendir(FLAGS_sgf_dir.c_str());
-  while (dirent* dp = readdir(dirp)) {
-    std::string filename(dp->d_name);
-    if (EndsWith(filename, ".sgf")) {
-      sgf_files.push_back(filename);
-    }
-  }
-  closedir(dirp);
-
   using Pair = std::pair<std::unique_ptr<MctsPlayer>, Move>;
   std::vector<Pair> puzzles;
-  for (const auto& sgf_file : sgf_files) {
+  for (const auto& sgf_file : GetSgfFiles()) {
     std::ifstream ifs(file::JoinPath(FLAGS_sgf_dir, sgf_file));
     MG_CHECK(ifs);
     sgf::Ast ast;
@@ -723,6 +726,44 @@ void Puzzle() {
   std::cout << "Solved " << result << " of " << puzzles.size() << " puzzles ("
             << std::fixed << std::setprecision(1)
             << result * 100.0f / puzzles.size() << "%)." << std::endl;
+}
+
+void Replay() {
+  const bool use_ansi_colors = isatty(fileno(stderr));
+
+  auto start_time = absl::Now();
+
+  MctsPlayer::Options options;
+  ParseMctsPlayerOptionsFromFlags(&options);
+  options.verbose = true;
+
+  auto sgf_files = GetSgfFiles();
+  size_t num_moves = 0;
+  for (const auto& sgf_file : sgf_files) {
+    std::ifstream ifs(file::JoinPath(FLAGS_sgf_dir, sgf_file));
+    MG_CHECK(ifs);
+    sgf::Ast ast;
+    using Iter = std::istreambuf_iterator<char>;
+    MG_CHECK(ast.Parse(std::string(Iter(ifs), Iter())));
+    MctsPlayer player(nullptr, options);
+    for (const auto& move : GetMainLineMoves(ast)) {
+      if (player.options().verbose) {
+        const auto& position = player.root()->position;
+        std::cerr << position.ToPrettyString(use_ansi_colors);
+        std::cerr << "Move: " << position.n()
+                  << " Captures X: " << position.num_captures()[0]
+                  << " O: " << position.num_captures()[1] << std::endl;
+        std::cerr << player.root()->Describe() << std::endl;
+      }
+      player.PlayMove(move.c);
+      ++num_moves;
+    }
+  }
+
+  std::cerr << "Checked " << sgf_files.size() << " games with " << num_moves
+            << " moves, total time "
+            << absl::ToDoubleSeconds(absl::Now() - start_time) << " sec."
+            << std::endl;
 }
 
 void Eval() {
@@ -786,6 +827,8 @@ int main(int argc, char* argv[]) {
     minigo::EvalEven();
   } else if (FLAGS_mode == "puzzle") {
     minigo::Puzzle();
+  } else if (FLAGS_mode == "replay") {
+    minigo::Replay();
   } else if (FLAGS_mode == "eval") {
     minigo::Eval();
   } else if (FLAGS_mode == "gtp") {
