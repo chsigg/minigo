@@ -15,6 +15,9 @@
 #ifndef CC_DUAL_NET_LITE_DUAL_NET_H_
 #define CC_DUAL_NET_LITE_DUAL_NET_H_
 
+#include <memory>
+#include <string>
+
 #include "cc/dual_net/dual_net.h"
 
 namespace minigo {

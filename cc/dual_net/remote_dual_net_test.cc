@@ -99,7 +99,7 @@ TEST_F(InferenceServerTest, Test) {
       }
     }
     DualNet::Result result =
-        std::move(fake_dual_net_->RunMany({std::move(features)}).front());
+        std::move(fake_dual_net_->RunMany({std::move(features)}));
 
     // Put the outputs.
     PutOutputsRequest put_outputs_request;
@@ -124,7 +124,7 @@ TEST_F(InferenceServerTest, Test) {
 
   std::vector<DualNet::BoardFeatures> features(16);
   auto result =
-      std::move(remote_dual_net_->RunMany({std::move(features)}).front());
+      std::move(remote_dual_net_->RunMany({std::move(features)}));
   for (const auto& policy : result.policies) {
     ASSERT_EQ(std::equal(priors_.begin(), priors_.end(), policy.begin()), true);
   }

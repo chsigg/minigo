@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -42,8 +43,8 @@
 #include "cc/check.h"
 #include "cc/constants.h"
 #include "cc/dual_net/factory.h"
-#include "cc/file/filesystem.h"
 #include "cc/file/path.h"
+#include "cc/file/utils.h"
 #include "cc/gtp_player.h"
 #include "cc/init.h"
 #include "cc/mcts_player.h"
@@ -156,25 +157,15 @@ std::string GetOutputSubDir(absl::Time now) {
   return absl::FormatTime(FLAGS_subdir_format, now, absl::UTCTimeZone());
 }
 
-void WriteExample(const std::string& output_dir, const std::string& output_name,
-                  const MctsPlayer& player) {
-  MG_CHECK(file::RecursivelyCreateDir(output_dir));
-
-  // Write the TensorFlow examples.
-  std::vector<tensorflow::Example> examples;
-  examples.reserve(player.history().size());
-  DualNet::BoardFeatures features;
-  std::vector<const Position::Stones*> recent_positions;
-  for (const auto& h : player.history()) {
-    h.node->GetMoveHistory(DualNet::kMoveHistory, &recent_positions);
-    DualNet::SetFeatures(recent_positions, h.node->position.to_play(),
-                         &features);
-    examples.push_back(
-        tf_utils::MakeTfExample(features, h.search_pi, player.result()));
+std::string FormatInferenceInfo(
+    const std::vector<MctsPlayer::InferenceInfo>& inferences) {
+  std::vector<std::string> parts;
+  parts.reserve(inferences.size());
+  for (const auto& info : inferences) {
+    parts.push_back(absl::StrCat(info.model, "(", info.first_move, ",",
+                                 info.last_move, ")"));
   }
-
-  auto output_path = file::JoinPath(output_dir, output_name + ".tfrecord.zz");
-  tf_utils::WriteTfExamples(output_path, examples);
+  return absl::StrJoin(parts, ", ");
 }
 
 void WriteSgf(const std::string& output_dir, const std::string& output_name,
@@ -218,10 +209,14 @@ void WriteSgf(const std::string& output_dir, const std::string& output_name,
   options.result = player_b.result_string();
   options.black_name = player_b.name();
   options.white_name = player_w.name();
+  options.game_comment = absl::StrCat(
+      "B inferences: ", FormatInferenceInfo(player_b.inferences()), "\n",
+      "W inferences: ", FormatInferenceInfo(player_w.inferences()));
+
   auto sgf_str = sgf::CreateSgfString(moves, options);
 
   auto output_path = file::JoinPath(output_dir, output_name + ".sgf");
-  TF_CHECK_OK(tf_utils::WriteFile(output_path, sgf_str));
+  MG_CHECK(file::WriteFile(output_path, sgf_str));
 }
 
 void WriteSgf(const std::string& output_dir, const std::string& output_name,
@@ -399,8 +394,8 @@ class SelfPlayer {
       auto example_dir =
           is_holdout ? game_options.holdout_dir : game_options.output_dir;
       if (!example_dir.empty()) {
-        WriteExample(file::JoinPath(example_dir, sub_dir), output_name,
-                     *player);
+        tf_utils::WriteGameExamples(file::JoinPath(example_dir, sub_dir),
+                                    output_name, *player);
       }
 
       if (!game_options.sgf_dir.empty()) {
@@ -419,7 +414,7 @@ class SelfPlayer {
       return;
     }
     uint64_t new_flags_timestamp;
-    TF_CHECK_OK(tf_utils::GetModTime(FLAGS_flags_path, &new_flags_timestamp));
+    MG_CHECK(file::GetModTime(FLAGS_flags_path, &new_flags_timestamp));
     std::cerr << "flagfile:" << FLAGS_flags_path
               << " old_ts:" << absl::FromUnixMicros(flags_timestamp_)
               << " new_ts:" << absl::FromUnixMicros(new_flags_timestamp);
@@ -430,7 +425,7 @@ class SelfPlayer {
 
     flags_timestamp_ = new_flags_timestamp;
     std::string contents;
-    TF_CHECK_OK(tf_utils::ReadFile(FLAGS_flags_path, &contents));
+    MG_CHECK(file::ReadFile(FLAGS_flags_path, &contents));
 
     std::vector<std::string> lines =
         absl::StrSplit(contents, '\n', absl::SkipEmpty());
