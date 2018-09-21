@@ -26,8 +26,6 @@ cc_library(
     hdrs = glob(
         include = ["cuda/include/**/*.h*"],
     ),
-    strip_include_prefix = "cuda/include",
-    include_prefix = "cuda",
     srcs = [
          "cuda/lib64/stubs/libcuda.so",
          "cuda/lib64/libcudart.so",
@@ -42,8 +40,6 @@ cc_library(
           "tensorrt/lib/libnvparsers.so*",
         ]),
     hdrs = glob(["tensorrt/include/Nv*.h"]),
-    include_prefix = "tensorrt",
-    strip_include_prefix = "tensorrt/include",
 )
 """)
 

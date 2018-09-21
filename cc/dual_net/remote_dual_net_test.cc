@@ -123,8 +123,7 @@ TEST_F(InferenceServerTest, Test) {
   });
 
   std::vector<DualNet::BoardFeatures> features(16);
-  auto result =
-      std::move(remote_dual_net_->RunMany({std::move(features)}));
+  auto result = std::move(remote_dual_net_->RunMany({std::move(features)}));
   for (const auto& policy : result.policies) {
     ASSERT_EQ(std::equal(priors_.begin(), priors_.end(), policy.begin()), true);
   }

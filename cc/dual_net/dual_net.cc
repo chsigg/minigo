@@ -19,7 +19,7 @@
 #include "absl/memory/memory.h"
 #include "cc/color.h"
 #include "cc/constants.h"
-#include "cuda/cuda_runtime_api.h"
+#include "cuda/include/cuda_runtime_api.h"
 
 // TODO(csigg): Expand explanation.
 DEFINE_int32(batch_size, 1024, "Inference batch size.");

@@ -121,8 +121,7 @@ class LiteDualNet : public DualNet {
       for (int i = 0; i < kNumMoves; ++i) {
         policies[j][i] =
             policy_params.scale *
-            (policy_data[j * num_features
-                + i] - policy_params.zero_point);
+            (policy_data[j * num_features + i] - policy_params.zero_point);
       }
       values[j] =
           value_params.scale * (value_data[j] - value_params.zero_point);

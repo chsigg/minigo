@@ -22,9 +22,9 @@
 #include "cc/check.h"
 #include "cc/constants.h"
 #include "cc/thread_safe_queue.h"
-#include "cuda/cuda_runtime_api.h"
-#include "tensorrt/NvInfer.h"
-#include "tensorrt/NvUffParser.h"
+#include "cuda/include/cuda_runtime_api.h"
+#include "tensorrt/include/NvInfer.h"
+#include "tensorrt/include/NvUffParser.h"
 
 namespace minigo {
 

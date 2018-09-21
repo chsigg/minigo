@@ -378,7 +378,7 @@ void MctsPlayer::ProcessLeaves(const std::vector<MctsNode*>& leaves) {
         symmetries_used_[i], raw_features.data(), features[i].data());
   }
 
-  auto result = std::move(dual_net_->RunMany(std::move(features)));
+  auto result = dual_net_->RunMany(std::move(features));
 
   // Record some information about the inference.
   if (!result.model.empty()) {
