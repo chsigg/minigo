@@ -1,1 +1,4 @@
+import %workspace%/tools/tf_bazel.rc
+import %workspace%/tools/tf_configure.rc
+
 build --define=trt=1 --define=tf=1 --define=board_size=9

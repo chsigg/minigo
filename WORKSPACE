@@ -1,13 +1,18 @@
 http_archive(
-    name = "com_github_gflags_gflags",
-    strip_prefix = "gflags-e292e0452fcfd5a8ae055b59052fc041cbab4abf",
-    urls = ["https://github.com/gflags/gflags/archive/e292e0452fcfd5a8ae055b59052fc041cbab4abf.zip"],
+    name = "io_bazel_rules_closure",
+    sha256 = "a38539c5b5c358548e75b44141b4ab637bba7c4dc02b46b1f62a96d6433f56ae",
+    strip_prefix = "rules_closure-dbb96841cc0a5fb2664c37822803b06dab20c7d1",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_closure/archive/dbb96841cc0a5fb2664c37822803b06dab20c7d1.tar.gz",
+        "https://github.com/bazelbuild/rules_closure/archive/dbb96841cc0a5fb2664c37822803b06dab20c7d1.tar.gz",  # 2018-04-13
+    ],
 )
 
+# When changing the TensorFlow version, also update tools/rf_bazel.rc.
 http_archive(
-    name = "com_google_absl",
-    strip_prefix = "abseil-cpp-a7e522daf1ec9cda69b356472f662142dd0c1215",
-    urls = ["https://github.com/abseil/abseil-cpp/archive/a7e522daf1ec9cda69b356472f662142dd0c1215.zip"],
+    name = "org_tensorflow",
+    strip_prefix = "tensorflow-mlperf",
+    urls = ["https://github.com/chsigg/tensorflow/archive/mlperf.zip"],
 )
 
 new_http_archive(
@@ -18,29 +23,15 @@ new_http_archive(
 )
 
 http_archive(
-    name = "com_google_googletest",
-    strip_prefix = "googletest-master",
-    urls = ["https://github.com/google/googletest/archive/master.zip"],
-)
-
-http_archive(
     name = "com_googlesource_code_cctz",
     strip_prefix = "cctz-2.2",
     urls = ["https://github.com/google/cctz/archive/v2.2.zip"],
 )
 
-http_archive(
-    name = "org_pubref_rules_protobuf",
-    strip_prefix = "rules_protobuf-0.8.2",
-    urls = ["https://github.com/pubref/rules_protobuf/archive/v0.8.2.zip"],
-)
+load("@org_tensorflow//tensorflow:workspace.bzl", "tf_workspace")
 
-load("@org_pubref_rules_protobuf//cpp:rules.bzl", "cpp_proto_repositories")
-load("@org_pubref_rules_protobuf//python:rules.bzl", "py_proto_repositories")
-load("//cc:cuda_configure.bzl", "cuda_configure")
+tf_workspace()
 
-cpp_proto_repositories()
+load("//cc:tensorrt_parsers_configure.bzl", "tensorrt_parsers_configure")
 
-py_proto_repositories()
-
-cuda_configure(name = "local_config_cuda")
+tensorrt_parsers_configure(name = "local_config_tensorrt_parsers")

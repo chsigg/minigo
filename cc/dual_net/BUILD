@@ -20,10 +20,11 @@ minigo_cc_library(
     hdrs = ["dual_net.h"],
     deps = [
         "//cc:base",
+        "//cc:cuda",
         "//cc:position",
         "@com_github_gflags_gflags//:gflags",
         "@com_google_absl//absl/types:span",
-        "@local_config_cuda//:cuda",
+        "@local_config_cuda//cuda:cuda_headers",
     ],
 )
 
@@ -136,11 +137,11 @@ minigo_cc_library(
         ":dual_net",
         "//cc:base",
         "//cc:check",
+        "//cc:cuda",
+        "//cc:tensorrt",
         "//cc:thread_safe_queue",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
-        "@local_config_cuda//:cuda",
-        "@local_config_cuda//:tensorrt",
     ],
 )
 

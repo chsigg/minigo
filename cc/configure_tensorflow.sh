@@ -17,7 +17,7 @@ mkdir -p ${dst_dir}
 # TODO(tommadams): we should probably switch to Clang at some point.
 # TF lite is broken in the v1.9.0 release. Checkout at the commit that fixed it.
 # TODO(tommadams): switch to v1.9.1 when that's released.
-commit_tag="v1.9.0"
+commit_tag="r1.11"
 
 echo "Cloning tensorflow to ${tmp_dir}"
 git clone https://github.com/tensorflow/tensorflow "${tmp_dir}"

@@ -14,10 +14,22 @@ load(
 )
 
 cc_library(
+    name = "cuda",
+    deps = [
+        "@local_config_cuda//cuda:cuda_headers",
+        "@local_config_cuda//cuda:cudart",
+    ],
+)
+
+cc_library(
     name = "tensorflow",
     srcs = [
-        "tensorflow/libtensorflow_cc.so",
-        "tensorflow/libtensorflow_framework.so",
+        # "@org_tensorflow//tensorflow:libtensorflow.so",
+        "@org_tensorflow//tensorflow:libtensorflow_cc.so",
+        "@org_tensorflow//tensorflow:libtensorflow_framework.so",
+    ],
+    deps = [
+        # "@org_tensorflow//tensorflow:install_headers",
     ],
     hdrs = glob(
         ["tensorflow/**/*"],
@@ -34,7 +46,7 @@ cc_library(
 cc_library(
     name = "tf_lite",
     srcs = [
-        "tensorflow/libtensorflow_lite.a",
+        # "tensorflow/libtensorflow_lite.a",
     ],
     hdrs = glob(
         [
@@ -45,6 +57,15 @@ cc_library(
     ),
     linkopts = ["-ldl"],
     strip_include_prefix = "tensorflow",
+)
+
+cc_library(
+    name = "tensorrt",
+    deps = [
+        "@local_config_tensorrt//:nv_infer",
+        "@local_config_tensorrt//:tensorrt_headers",
+        "@local_config_tensorrt_parsers//:nvparsers",
+    ],
 )
 
 minigo_cc_library(
@@ -252,6 +273,7 @@ minigo_cc_test_9_only(
     name = "mcts_node_test",
     size = "small",
     srcs = ["mcts_node_test.cc"],
+    linkopts = ["-lm"],
     deps = [
         ":mcts",
         ":position",
@@ -265,6 +287,7 @@ minigo_cc_test_9_only(
     name = "mcts_player_test",
     size = "small",
     srcs = ["mcts_player_test.cc"],
+    linkopts = ["-lm"],
     deps = [
         ":base",
         ":mcts",
@@ -293,6 +316,7 @@ minigo_cc_test(
     name = "random_test",
     size = "small",
     srcs = ["random_test.cc"],
+    linkopts = ["-lm"],
     deps = [
         ":random",
         "@com_google_googletest//:gtest_main",
@@ -338,6 +362,7 @@ minigo_cc_test(
 minigo_cc_binary(
     name = "main",
     srcs = ["main.cc"],
+    linkopts = ["-lm"],
     visibility = ["//visibility:public"],
     deps = [
         ":base",
@@ -362,6 +387,7 @@ minigo_cc_binary(
 minigo_cc_binary(
     name = "position_benchmark",
     srcs = ["position_benchmark.cc"],
+    linkopts = ["-lm"],
     deps = [
         ":base",
         ":position",

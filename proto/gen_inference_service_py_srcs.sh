@@ -8,7 +8,6 @@ bazel build proto:inference_service_py_pb2
 
 cp -f bazel-genfiles/proto/inference_service_pb2.py \
       bazel-genfiles/proto/inference_service_pb2_grpc.py \
-      bazel-genfiles/proto/inference_service_py_pb2.pb.descriptor_set \
       proto
 
 popd
