@@ -24,23 +24,11 @@ cc_library(
 cc_library(
     name = "tensorflow",
     srcs = [
-        # "@org_tensorflow//tensorflow:libtensorflow.so",
-        "@org_tensorflow//tensorflow:libtensorflow_cc.so",
         "@org_tensorflow//tensorflow:libtensorflow_framework.so",
     ],
     deps = [
-        # "@org_tensorflow//tensorflow:install_headers",
+        "@org_tensorflow//tensorflow/core:tensorflow",
     ],
-    hdrs = glob(
-        ["tensorflow/**/*"],
-        exclude = [
-            "**/*.a",
-            "**/*.so",
-            "tensorflow/flatbuffers/**",
-            "tensorflow/tensorflow/contrib/lite/**",
-        ],
-    ),
-    strip_include_prefix = "tensorflow",
 )
 
 cc_library(

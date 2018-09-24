@@ -11,9 +11,13 @@ http_archive(
 # When changing the TensorFlow version, also update tools/rf_bazel.rc.
 http_archive(
     name = "org_tensorflow",
-    strip_prefix = "tensorflow-mlperf",
-    urls = ["https://github.com/chsigg/tensorflow/archive/mlperf.zip"],
+    strip_prefix = "tensorflow-7832d2c3a84c79c0dc76a7ed1f6560707a294f22",
+    urls = ["https://github.com/tensorflow/tensorflow/archive/7832d2c3a84c79c0dc76a7ed1f6560707a294f22.zip"],
 )
+#local_repository(
+#    name = "org_tensorflow",
+#    path = "../tensorflow",
+#)
 
 new_http_archive(
     name = "com_google_benchmark",
